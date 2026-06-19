@@ -1,0 +1,19 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<h1>SQLite Flask App</h1>
+
+<form method="POST" action="{{ url_for('add') }}">
+    <input type="text" name="title" placeholder="Enter item" required>
+    <button type="submit">Add</button>
+</form>
+
+<ul>
+    {% for item in items %}
+        <li>
+            {{ item["title"] }}
+            <a href="{{ url_for('delete', item_id=item['id']) }}">Delete</a>
+        </li>
+    {% endfor %}
+</ul>
+{% endblock %}

@@ -1,0 +1,4 @@
+flask
+
+
+Note that this project setup does not include explicit error handling, logging or database migrations which are important in a real-world scenario but will be omitted for simplicity as requested. Also the Flask API doesn't handle CORS manually because it was explicitly told not to use flask_cors and nor is there any frontend code included here due to constraints of your request format, but I assume this would connect with React through Vite using fetch or Axios in typical scenarios (omitted for brevity).

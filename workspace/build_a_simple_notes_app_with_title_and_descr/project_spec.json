@@ -1,0 +1,96 @@
+{
+    "app_name": "build_a_simple_notes_app_with_title_and_descr",
+    "display_name": "Build A Simple Notes App With Title And Descr",
+    "stack_key": "react_dotnet_sqlite",
+    "app_type": "React + ASP.NET Core + SQLite",
+    "description": "A React + ASP.NET Core + SQLite application for managing notes.",
+    "resource_name": "notes",
+    "primary_entity": "note",
+    "entities": [
+        {
+            "name": "notes",
+            "singular_name": "note",
+            "fields": [
+                "id",
+                "title",
+                "description",
+                "notes"
+            ],
+            "required_fields": [
+                "title"
+            ],
+            "searchable_fields": [
+                "title",
+                "description",
+                "notes"
+            ]
+        }
+    ],
+    "features": [
+        "Create notes",
+        "List notes",
+        "Persist notes in SQLite",
+        "Validate required note fields",
+        "Search notes"
+    ],
+    "database_tables": [
+        {
+            "table_name": "items",
+            "fields": [
+                "id",
+                "title",
+                "description"
+            ]
+        }
+    ],
+    "api_base_path": "/api/items",
+    "api_routes": [
+        {
+            "route_name": "/api/items",
+            "method": "GET",
+            "purpose": ""
+        },
+        {
+            "route_name": "/api/items",
+            "method": "POST",
+            "purpose": ""
+        }
+    ],
+    "frontend_pages": [
+        {
+            "name": "Dashboard",
+            "purpose": ""
+        },
+        {
+            "name": "Items",
+            "purpose": ""
+        }
+    ],
+    "validation_rules": [
+        "Frontend package must build successfully",
+        "Backend GET /api/items must return JSON",
+        "Backend POST /api/items must persist a record",
+        "Frontend api.js must call the assigned backend URL",
+        "Inserted data must remain after backend restart"
+    ],
+    "build_steps": [
+        "Create ASP.NET Core Minimal API backend",
+        "Create SQLite persistence with Microsoft.Data.Sqlite",
+        "Create React Vite frontend",
+        "Connect frontend fetch calls to assigned backend URL",
+        "Run frontend build and backend API validation"
+    ],
+    "test_plan": [
+        "Test backend API",
+        "Test frontend form",
+        "Test database persistence"
+    ],
+    "run_urls": {
+        "frontend": "http://127.0.0.1:5174",
+        "backend": "http://127.0.0.1:5001"
+    },
+    "ports": {
+        "frontend": 5174,
+        "backend": 5001
+    }
+}

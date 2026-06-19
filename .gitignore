@@ -1,0 +1,50 @@
+# Python
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.ruff_cache/
+
+# Streamlit and local environment
+.streamlit/secrets.toml
+.env
+.env.*
+
+# Node/Vite generated app dependencies and builds
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+build/
+**/build/
+
+# .NET generated app output
+bin/
+obj/
+**/bin/
+**/obj/
+
+# Local databases and runtime files
+*.db
+*.sqlite
+*.sqlite3
+workspace/**/app.db
+workspace/**/backend/app.db
+workspace/**/backend/*.db
+yourdatabase.db
+
+# Generated snapshots and local backups
+workspace/_snapshots/
+Backup & Milestones/
+
+# Logs and OS/editor noise
+*.log
+*.tmp
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+

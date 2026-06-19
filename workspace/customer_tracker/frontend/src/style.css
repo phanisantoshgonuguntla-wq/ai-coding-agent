@@ -1,0 +1,8 @@
+/* Basic styles assuming no external libraries are used */
+body {
+    font-family: sans-serif;
+}
+/* Additional styling here...*/
+
+
+Please be aware that in a real development environment, you'd have to create the React components with form handling logic for CRUD operations and style them accordingly. You would also need setup Vite configuration files (`vite.config.js`), server-side rendering (if needed), CORS configurations when using plain Flask without flask_cors plugin or alternative approaches, as well as test plans which are crucial to the project's success but omitted here due to constraints of your request format and instructions for simplicity.

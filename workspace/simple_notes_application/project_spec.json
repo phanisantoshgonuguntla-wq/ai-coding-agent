@@ -1,0 +1,48 @@
+{
+    "app_name": "simple_notes_application",
+    "app_type": "React + Flask + SQLite",
+    "description": "Generated app plan fallback because model returned invalid JSON.",
+    "features": [
+        "Dashboard",
+        "Create records",
+        "List records",
+        "Update records",
+        "Delete records"
+    ],
+    "database_tables": [
+        {
+            "table_name": "items",
+            "fields": [
+                "id",
+                "title",
+                "description"
+            ]
+        }
+    ],
+    "api_routes": [
+        {
+            "route_name": "/api/items",
+            "method": "GET"
+        },
+        {
+            "route_name": "/api/items",
+            "method": "POST"
+        }
+    ],
+    "frontend_pages": [
+        "Dashboard",
+        "Items"
+    ],
+    "build_steps": [
+        "Create Flask API",
+        "Create SQLite database",
+        "Create React frontend",
+        "Connect frontend to backend",
+        "Run and test app"
+    ],
+    "test_plan": [
+        "Test backend API",
+        "Test frontend form",
+        "Test database persistence"
+    ]
+}

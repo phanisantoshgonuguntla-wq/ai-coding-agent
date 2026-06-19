@@ -1,0 +1,125 @@
+{
+    "app_name": "build_a_simple_customer_tracker_app_with_name",
+    "display_name": "Build A Simple Customer Tracker App With Name",
+    "stack_key": "react_flask_sqlite",
+    "app_type": "React + Flask + SQLite",
+    "description": "A simple application to track customers' information and notes, with search capabilities.",
+    "resource_name": "customers",
+    "primary_entity": "customer",
+    "entities": [
+        {
+            "name": "customers",
+            "singular_name": "customer",
+            "fields": [
+                "id",
+                "name",
+                "email",
+                "phone",
+                "notes"
+            ],
+            "required_fields": [
+                "name"
+            ],
+            "searchable_fields": [
+                "name",
+                "email",
+                "phone",
+                "notes"
+            ]
+        }
+    ],
+    "features": [
+        "Create customers",
+        "List customers",
+        "Persist customers in SQLite",
+        "Validate required customer fields",
+        "Search customers"
+    ],
+    "database_tables": [
+        {
+            "table_name": "customers",
+            "fields": [
+                {
+                    "name": "id",
+                    "type": "INTEGER PRIMARY KEY AUTOINCREMENT"
+                },
+                {
+                    "name": "name",
+                    "type": "TEXT NOT NULL"
+                },
+                {
+                    "name": "email",
+                    "type": "TEXT UNIQUE NOT NULL"
+                },
+                {
+                    "name": "phone",
+                    "type": "TEXT"
+                }
+            ]
+        },
+        {
+            "table_name": "notes",
+            "fields": [
+                {
+                    "name": "id",
+                    "type": "INTEGER PRIMARY KEY AUTOINCREMENT"
+                },
+                {
+                    "name": "customer_id",
+                    "type": "INTEGER REFERENCES customers(id)"
+                },
+                {
+                    "name": "note",
+                    "type": "TEXT NOT NULL"
+                }
+            ]
+        }
+    ],
+    "api_base_path": "/api/items",
+    "api_routes": [
+        {
+            "route_name": "/api/items",
+            "method": "GET",
+            "purpose": "List customers"
+        },
+        {
+            "route_name": "/api/items",
+            "method": "POST",
+            "purpose": "Create a customer"
+        }
+    ],
+    "frontend_pages": [
+        {
+            "name": "Dashboard",
+            "purpose": "Manage customers"
+        }
+    ],
+    "validation_rules": [
+        "Frontend package must build successfully",
+        "Backend GET /api/items must return JSON",
+        "Backend POST /api/items must persist a record",
+        "Frontend api.js must call the assigned backend URL",
+        "Inserted data must remain after backend restart"
+    ],
+    "build_steps": [
+        "Create Flask JSON API backend",
+        "Create SQLite persistence with sqlite3",
+        "Create React Vite frontend",
+        "Connect frontend fetch calls to assigned backend URL",
+        "Run frontend build and backend API validation"
+    ],
+    "test_plan": [
+        "Run validate app after build",
+        "Create a sample record from the frontend",
+        "Refresh the frontend and confirm data remains",
+        "Restart fullstack app and confirm persistence"
+    ],
+    "run_urls": {
+        "frontend": "http://127.0.0.1:5173",
+        "backend": "http://127.0.0.1:5000"
+    },
+    "ports": {
+        "frontend": 5173,
+        "backend": 5000
+    }
+}

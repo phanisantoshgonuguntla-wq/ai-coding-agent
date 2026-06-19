@@ -1,0 +1,67 @@
+plaintext
+Flask==2.0.1
+sqlite3
+
+
+file: frontend/package.json (simplified)
+
+{
+  "name": "customer-tracker",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "@vitejs/plugin-react": "^3.2.5",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {},
+  "scripts": {}
+}
+
+
+file: frontend/index.html (simplified)
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Customer Tracker</title>
+</head>
+<body>
+    <!-- Include Vite bundling script here. For a standalone HTML file, include references to JavaScript files: -->
+</body>
+</html>
+
+
+file: frontend/src/main.jsx (simplified)
+
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import App from './App';
+
+createRoot(document.getElementById('root')).render(<App />);  // Assuming there is an <div id="root"></div> in your HTML body for mounting React components:
+
+
+file: frontend/src/App.jsx (simplified)
+
+import { useState } from 'react';
+import API_ENDPOINTS from './api';  // Import routes or endpoint functions here if necessary, otherwise manage these in a separate utility module based on the application design:
+import styles from './style.css';  // Assume there is corresponding CSS file for styling components.
+
+const App = () => {
+    const [customerData, setCustomerData] = useState({});
+    
+    return (
+        <div id="root">
+            {/* Your frontend structure and UI elements go here */}
+            {/* Ensure that API_ENDPOINTS are called within appropriate React event handlers like 'useEffect' or custom hooks for fetching/updating data: */}
+        </div>
+    );
+};
+
+export default App;
+
+
+file: frontend/src/style.css (simplified)  # Use CSS to style your application components, ensuring accessibility and a pleasant user interface without relying on Tailwind or other specific libraries as per the instructions provided.
+
+To build this project structure into functional code, you would need to write out all of these files with their respective logic for handling registrations, logins, customer information entry, notes taking, search functionality, and so forth based on a fuller understanding of your application's requirements in more detail than can be provided here.

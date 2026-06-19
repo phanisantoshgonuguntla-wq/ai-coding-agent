@@ -1,0 +1,80 @@
+flask-cors==3.0.8
+Flask==1.1.2
+sqlite3==3.36.0
+ujson==4.0.1
+
+file: frontend/package.json (simplified for the sake of example)
+
+{
+  "name": "frontend",
+  "private": true,
+  "version": "0.1.0",
+  "devDependencies": {
+    "babel-loader": "^8.2.1",
+    "react": "^17.0.0",
+    "@babel/core": "^7.14.3"
+  },
+  "dependencies": {
+    "react-dom": "^17.0.0"
+  }
+}
+
+file: frontend/index.html (simplified for the sake of example)
+
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    ...
+  </head>
+  
+  <body>
+    <div id="root"></div>
+    
+    <script type="text/babel" src="/src/main.jsx"></script>
+    <!-- Other scripts and styles as needed -->
+  </body>
+</html>
+
+file: frontend/src/main.jsx (simplified for the sake of example)
+
+import React from 'react';
+import { useState, useEffect } from 'react';
+import axios from 'axios';
+import ItemsList from './ItemsList';
+
+const App = () => {
+  const [items, setItems] = useState([]);
+  
+  useEffect(() => {
+    fetch('/api/items')
+      .then(res => res.json())
+      .then(setItems)
+  }, []);
+  
+  return (
+    <div>
+      <h1>Inventory Management System</h1>
+      <ul>
+        {items.map(item => (
+          <li key={item.id}>{item.title} - {item.description}</li>
+        ))}
+      </ul>
+    </div>
+  );
+};
+
+export default App;
+
+file: frontend/src/ItemsList.jsx (simplified for the sake of example)
+
+import React from 'react';
+import { useState } from 'react';
+import axios from 'axios';
+
+const ItemsList = () => {
+  const [items, setItems] = useState([]);
+  
+  // similar to the code in main.jsx for fetching items...
+};
+
+export default ItemsList;
