@@ -1,0 +1,44 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Compile Python files
+        run: >
+          python -m py_compile
+          agent.py
+          tools.py
+          app.py
+          agent_llm.py
+          agent_stacks.py
+          agent_text.py
+          agent_project_files.py
+          agent_planner.py
+          agent_builder.py
+          agent_healer.py
+          agent_quality.py
+          agent_modifier.py
+          agent_commands.py
+
+      - name: Run tests
+        run: python -m pytest
