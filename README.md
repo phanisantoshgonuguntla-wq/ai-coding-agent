@@ -52,6 +52,7 @@ Inside the Streamlit UI, use the guided modes or run commands such as:
 
 ```text
 create app build a customer tracker with name, email, phone, and notes
+generate code write a Python function that validates email addresses
 run fullstack <project_name>
 validate app <project_name>
 refresh project ports <project_name>

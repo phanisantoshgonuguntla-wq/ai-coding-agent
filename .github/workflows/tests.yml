@@ -39,6 +39,7 @@ jobs:
           agent_quality.py
           agent_modifier.py
           agent_commands.py
+          agent_codegen.py
 
       - name: Run tests
         run: python -m pytest

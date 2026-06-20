@@ -10,6 +10,7 @@ def make_context():
         "modify_app": lambda project, change: f"modify:{project}:{change}",
         "add_feature": lambda project, feature: f"feature:{project}:{feature}",
         "add_search_feature": lambda project: f"search:{project}",
+        "generate_code": lambda prompt: f"code:{prompt}",
         "create_app_workflow": lambda text: f"create:{text}",
     }
 
@@ -29,6 +30,10 @@ def test_supported_stacks_routes_to_handler():
 
 def test_build_from_plan_strips_command_prefix():
     assert agent_commands.run_agent("build from plan demo_app", make_context()) == "build:demo_app"
+
+
+def test_generate_code_routes_prompt_to_codegen_handler():
+    assert agent_commands.run_agent("generate code write a csv parser", make_context()) == "code:write a csv parser"
 
 
 def test_modify_app_validates_required_change_request():

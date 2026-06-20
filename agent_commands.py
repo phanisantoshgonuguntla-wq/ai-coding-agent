@@ -156,6 +156,11 @@ def build_command_registry(ctx):
             lambda text: ctx["create_app_workflow"](text),
         ),
         Command(
+            "generate_code",
+            lambda text, lower: lower.startswith("generate code "),
+            lambda text: ctx["generate_code"](strip_command_prefix(text, "generate code")),
+        ),
+        Command(
             "legacy_react_flask",
             lambda text, lower: "create react flask" in lower or "build react flask" in lower,
             lambda text: _generate_fullstack_project(text, ctx),

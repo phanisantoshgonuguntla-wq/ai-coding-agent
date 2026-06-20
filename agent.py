@@ -7,6 +7,7 @@ import sys
 import sqlite3
 
 import agent_builder
+import agent_codegen
 import agent_healer
 import agent_llm
 import agent_commands
@@ -107,6 +108,9 @@ AI Coding Agent commands:
 
 - add feature <project_name> <feature request>
   Add a feature to an existing app.
+
+- generate code <prompt>
+  Generate standalone code from a prompt without writing files.
 
 - quality check <project_name>
   Inspect generated project quality.
@@ -1682,6 +1686,11 @@ def add_search_feature(project_name):
         clean_frontend_dependencies,
         quality_fix_project,
     )
+
+
+def generate_code(prompt):
+    return agent_codegen.generate_code(prompt)
+
 
 def run_agent(user_input):
     return agent_commands.run_agent(user_input, globals())

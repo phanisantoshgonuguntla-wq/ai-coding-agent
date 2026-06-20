@@ -118,13 +118,14 @@ active_model = agent.set_ollama_model(custom_model)
 st.sidebar.caption(f"Active model: {active_model}")
 
 st.title("AI Coding Agent")
-st.caption("Build, modify, run, and inspect generated apps.")
+st.caption("Build, modify, run, inspect generated apps, and generate standalone code.")
 
 mode = st.radio(
     "Mode",
     [
         "Build a new app",
         "Modify an existing app",
+        "Generate code",
         "Run or inspect a project",
         "Advanced command",
     ],
@@ -167,6 +168,16 @@ elif mode == "Modify an existing app":
 
     if st.button("Modify app", type="primary", disabled=not projects):
         command = f"modify app {project_name} {change_request.strip()}"
+
+elif mode == "Generate code":
+    code_prompt = st.text_area(
+        "Describe the code you want",
+        placeholder="Example: Write a Python function that validates email addresses.",
+        height=140,
+    )
+
+    if st.button("Generate code", type="primary"):
+        command = f"generate code {code_prompt.strip()}"
 
 elif mode == "Run or inspect a project":
     if not projects:
