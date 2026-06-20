@@ -38,6 +38,14 @@ Generated projects live under `workspace/`. Each project can have its own ports,
    streamlit run app.py
    ```
 
+## Testing
+
+Run the lightweight unit tests:
+
+```powershell
+python -m pytest
+```
+
 ## Useful Agent Commands
 
 Inside the Streamlit UI, use the guided modes or run commands such as:
@@ -55,4 +63,3 @@ stop all apps
 ## GitHub Notes
 
 This repo should track the agent source and useful generated app source. It should not track local dependency folders, databases, build outputs, or snapshots. See `.gitignore` and `docs/GITHUB_CODEX_SETUP.md`.
-

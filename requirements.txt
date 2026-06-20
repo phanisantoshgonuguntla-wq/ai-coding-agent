@@ -3,3 +3,4 @@ langchain-community
 langchain-ollama
 streamlit
 ollama
+pytest
