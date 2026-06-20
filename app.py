@@ -63,6 +63,25 @@ def render_project_dashboard(project_name):
 
     st.caption(f"Project path: {dashboard['project_path']}")
 
+    if dashboard.get("runtime_started_at"):
+        st.caption(
+            "Runtime: "
+            f"started {dashboard['runtime_started_at']} "
+            f"(backend PID {dashboard.get('runtime_backend_pid')}, "
+            f"frontend PID {dashboard.get('runtime_frontend_pid')})"
+        )
+
+    runtime_log_files = dashboard.get("runtime_log_files") or {}
+
+    if runtime_log_files:
+        st.caption(
+            "Runtime logs: "
+            + ", ".join(
+                f"{name}: {path}"
+                for name, path in runtime_log_files.items()
+            )
+        )
+
     if dashboard["database_files"]:
         st.caption("Database: " + ", ".join(dashboard["database_files"]))
 

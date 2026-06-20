@@ -16,6 +16,98 @@ import urllib.error
 from datetime import datetime
 
 WORKSPACE_DIR = "workspace"
+RUNTIME_DIR = os.path.join(WORKSPACE_DIR, "_runtime")
+RUNTIME_STATE_FILE = os.path.join(RUNTIME_DIR, "state.json")
+RUNTIME_LOG_DIR = os.path.join(RUNTIME_DIR, "logs")
+
+
+def ensure_runtime_dirs():
+    os.makedirs(RUNTIME_LOG_DIR, exist_ok=True)
+
+
+def read_runtime_state():
+    if not os.path.exists(RUNTIME_STATE_FILE):
+        return {}
+
+    try:
+        with open(RUNTIME_STATE_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def write_runtime_state(state):
+    ensure_runtime_dirs()
+
+    with open(RUNTIME_STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(state, f, indent=4)
+
+
+def get_project_runtime_state(project_name):
+    return read_runtime_state().get(project_name, {})
+
+
+def get_runtime_log_paths(project_name):
+    ensure_runtime_dirs()
+    safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", project_name)
+
+    return {
+        "backend": os.path.join(RUNTIME_LOG_DIR, f"{safe_name}_backend.log"),
+        "frontend": os.path.join(RUNTIME_LOG_DIR, f"{safe_name}_frontend.log")
+    }
+
+
+def read_runtime_log_file(path):
+    if not path or not os.path.exists(path):
+        return ""
+
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            return f.read()
+    except Exception:
+        return ""
+
+
+def save_project_runtime_state(project_name, config, processes):
+    state = read_runtime_state()
+    log_paths = get_runtime_log_paths(project_name)
+
+    state[project_name] = {
+        "project_name": project_name,
+        "stack_key": config.get("stack_key"),
+        "frontend_url": config.get("frontend_url"),
+        "backend_url": config.get("backend_url"),
+        "frontend_port": config.get("frontend_port"),
+        "backend_port": config.get("backend_port"),
+        "backend_pid": processes["backend"].pid,
+        "frontend_pid": processes["frontend"].pid,
+        "started_at": datetime.now().isoformat(timespec="seconds"),
+        "log_files": log_paths,
+    }
+
+    write_runtime_state(state)
+    return state[project_name]
+
+
+def clear_project_runtime_state(project_name):
+    state = read_runtime_state()
+
+    if project_name in state:
+        del state[project_name]
+        write_runtime_state(state)
+
+
+def get_runtime_state_pids(project_name):
+    runtime_state = get_project_runtime_state(project_name)
+    pids = []
+
+    for key in ["backend_pid", "frontend_pid"]:
+        pid = runtime_state.get(key)
+
+        if isinstance(pid, int):
+            pids.append(pid)
+
+    return pids
 
 
 def get_project_spec(project_name):
@@ -349,6 +441,7 @@ def ensure_project_config(project_name, stack_key=None):
     return config
 
 def capture_process_output(project_name, process_name, stream):
+    log_path = get_runtime_log_paths(project_name).get(process_name)
 
     while True:
 
@@ -360,18 +453,38 @@ def capture_process_output(project_name, process_name, stream):
         if project_name in FULLSTACK_LOGS:
             FULLSTACK_LOGS[project_name][process_name] += line
 
+        if log_path:
+            try:
+                with open(log_path, "a", encoding="utf-8", errors="replace") as f:
+                    f.write(line)
+            except Exception:
+                pass
+
 def run_fullstack_project(project_name):
 
-    if project_name in FULLSTACK_PROCESSES:
+    config = ensure_project_config(project_name)
+    ports = [
+        config.get("backend_port"),
+        config.get("frontend_port")
+    ]
+
+    if project_name in FULLSTACK_PROCESSES or find_pids_listening_on_ports(ports):
         return f"Fullstack project is already running: {project_name}"
 
     project_path = os.path.join("workspace", project_name)
     backend_path = os.path.join(project_path, "backend")
     frontend_path = os.path.join(project_path, "frontend")
-    config = ensure_project_config(project_name)
     stack_key = config.get("stack_key", get_project_stack_key(project_name))
     backend_url = config["backend_url"]
     frontend_url = config["frontend_url"]
+    log_paths = get_runtime_log_paths(project_name)
+
+    for log_path in log_paths.values():
+        try:
+            with open(log_path, "w", encoding="utf-8") as f:
+                f.write(f"Runtime log for {project_name} started at {datetime.now().isoformat(timespec='seconds')}\n")
+        except Exception:
+            pass
 
     # -------------------------
     # Auto install Python deps
@@ -539,6 +652,12 @@ Install PHP or add it to PATH, then restart this project.
         "frontend": ""
     }
 
+    runtime_state = save_project_runtime_state(
+        project_name,
+        config,
+        FULLSTACK_PROCESSES[project_name]
+    )
+
     for process_name, process in FULLSTACK_PROCESSES[project_name].items():
         threading.Thread(
             target=capture_process_output,
@@ -560,6 +679,13 @@ Backend:
 
 Frontend:
 {frontend_url}
+
+Runtime state:
+workspace/_runtime/state.json
+
+Log files:
+Backend: {runtime_state["log_files"]["backend"]}
+Frontend: {runtime_state["log_files"]["frontend"]}
 """
 
 
@@ -584,10 +710,18 @@ def stop_fullstack_project(project_name):
 
         del FULLSTACK_PROCESSES[project_name]
 
+    for pid in get_runtime_state_pids(project_name):
+        try:
+            stopped.append(taskkill_process_tree(pid))
+        except Exception as e:
+            stopped.append(f"stored PID {pid} stop failed: {e}")
+
     listening_pids = find_pids_listening_on_ports(ports)
 
     for pid in sorted(listening_pids):
         stopped.append(taskkill_process_tree(pid))
+
+    clear_project_runtime_state(project_name)
 
     if not stopped:
         stopped.append("No running processes found for assigned project ports.")
@@ -608,8 +742,16 @@ Stopped:
 
 def stop_all_fullstack_projects():
     stopped = []
+    runtime_state = read_runtime_state()
 
     for project_name in list(FULLSTACK_PROCESSES.keys()):
+        result = stop_fullstack_project(project_name)
+        stopped.append(result.strip())
+
+    for project_name in list(runtime_state.keys()):
+        if project_name in FULLSTACK_PROCESSES:
+            continue
+
         result = stop_fullstack_project(project_name)
         stopped.append(result.strip())
 
@@ -753,6 +895,7 @@ def get_project_dashboard(project_name):
         }
 
     config = get_project_config(project_name)
+    runtime_state = get_project_runtime_state(project_name)
     stack_key = config.get("stack_key", get_project_stack_key(project_name))
     backend_port = config.get("backend_port")
     frontend_port = config.get("frontend_port")
@@ -781,6 +924,11 @@ def get_project_dashboard(project_name):
         "database_files": existing_databases,
         "latest_snapshot": get_latest_snapshot_name(project_name),
         "latest_history_entry": get_latest_history_entry(project_name),
+        "runtime_state": runtime_state,
+        "runtime_started_at": runtime_state.get("started_at"),
+        "runtime_backend_pid": runtime_state.get("backend_pid"),
+        "runtime_frontend_pid": runtime_state.get("frontend_pid"),
+        "runtime_log_files": runtime_state.get("log_files", {}),
     }
 
 
@@ -944,11 +1092,15 @@ CHECKS:
 
 def show_fullstack_logs(project_name):
 
-    if project_name not in FULLSTACK_LOGS:
+    logs = get_fullstack_logs(project_name)
+    runtime_state = get_project_runtime_state(project_name)
+    log_files = runtime_state.get("log_files", {})
+
+    if not logs.get("backend") and not logs.get("frontend") and not log_files:
         return "No logs found. Start the fullstack project first."
 
-    backend_logs = FULLSTACK_LOGS[project_name].get("backend", "")
-    frontend_logs = FULLSTACK_LOGS[project_name].get("frontend", "")
+    backend_logs = logs.get("backend", "")
+    frontend_logs = logs.get("frontend", "")
 
     if not backend_logs:
         backend_logs = "No backend logs captured yet."
@@ -962,6 +1114,10 @@ def show_fullstack_logs(project_name):
 
 ===== FRONTEND LOGS =====
 {frontend_logs}
+
+===== LOG FILES =====
+Backend: {log_files.get("backend", "None")}
+Frontend: {log_files.get("frontend", "None")}
 """
 
 
@@ -1026,13 +1182,25 @@ def extract_error_summary(stderr):
 
 def get_fullstack_logs(project_name):
 
-    if project_name not in FULLSTACK_LOGS:
-        return {
-            "backend": "",
-            "frontend": ""
-        }
+    logs = {
+        "backend": "",
+        "frontend": ""
+    }
 
-    return FULLSTACK_LOGS[project_name]
+    if project_name in FULLSTACK_LOGS:
+        logs["backend"] = FULLSTACK_LOGS[project_name].get("backend", "")
+        logs["frontend"] = FULLSTACK_LOGS[project_name].get("frontend", "")
+
+    runtime_state = get_project_runtime_state(project_name)
+    log_files = runtime_state.get("log_files", {})
+
+    if not logs["backend"]:
+        logs["backend"] = read_runtime_log_file(log_files.get("backend"))
+
+    if not logs["frontend"]:
+        logs["frontend"] = read_runtime_log_file(log_files.get("frontend"))
+
+    return logs
 
 import re
 
