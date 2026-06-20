@@ -1,13 +1,48 @@
-import os
+﻿import os
 import re
-import ast
 import json
-import urllib.request
 import time
 import subprocess
 import sys
 import sqlite3
-from langchain_community.llms import Ollama
+
+import agent_builder
+import agent_llm
+from agent_llm import (
+    get_ollama_models,
+    invoke_llm,
+    is_ollama_available,
+    is_ollama_model_installed,
+    ollama_memory_error_message,
+    ollama_model_missing_message,
+    ollama_unavailable_message,
+)
+from agent_stacks import (
+    SUPPORTED_APP_STACKS,
+    build_stack_instruction,
+    detect_requested_stack,
+    get_project_stack_key,
+    get_stack,
+    get_stack_build_steps,
+    list_supported_stacks,
+    looks_like_app_build_request,
+)
+from agent_text import clean_code_output, make_safe_project_name, strip_command_prefix
+from agent_project_files import (
+    detect_broken_file,
+    find_python_syntax_error,
+    parse_llm_project_output,
+    write_project,
+)
+from agent_planner import (
+    create_app_plan,
+    create_fallback_project_spec,
+    is_fallback_description,
+    normalize_project_spec,
+    plan_app,
+    refresh_project_spec,
+    save_project_spec,
+)
 
 from tools import (
     run_project_file,
@@ -37,119 +72,15 @@ from tools import (
 )
 
 WORKSPACE_DIR = "workspace"
-OLLAMA_BASE_URL = "http://localhost:11434"
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2:1b")
-llm = Ollama(model=OLLAMA_MODEL)
+OLLAMA_BASE_URL = agent_llm.OLLAMA_BASE_URL
+OLLAMA_MODEL = agent_llm.OLLAMA_MODEL
 
 
 def set_ollama_model(model_name):
     global OLLAMA_MODEL
-    global llm
 
-    OLLAMA_MODEL = model_name.strip() or OLLAMA_MODEL
-    llm = Ollama(model=OLLAMA_MODEL)
+    OLLAMA_MODEL = agent_llm.set_ollama_model(model_name)
     return OLLAMA_MODEL
-
-
-def is_ollama_available():
-    try:
-        with urllib.request.urlopen(f"{OLLAMA_BASE_URL}/api/tags", timeout=2) as response:
-            return response.status == 200
-    except Exception:
-        return False
-
-
-def get_ollama_models():
-    try:
-        with urllib.request.urlopen(f"{OLLAMA_BASE_URL}/api/tags", timeout=5) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-
-        return [
-            model.get("name", "")
-            for model in payload.get("models", [])
-            if model.get("name")
-        ]
-    except Exception:
-        return []
-
-
-def is_ollama_model_installed(model_name):
-    installed_models = get_ollama_models()
-    return any(
-        model == model_name or model.startswith(f"{model_name}:")
-        for model in installed_models
-    )
-
-
-def ollama_unavailable_message():
-    return f"""
-Ollama is not running or is not reachable.
-
-The agent uses the local Ollama server at:
-{OLLAMA_BASE_URL}
-
-Please start Ollama, then try again.
-
-Quick checks:
-- Open the Ollama desktop app, or run: ollama serve
-- Confirm the model exists: ollama list
-- If needed, install the model: ollama pull {OLLAMA_MODEL}
-
-After Ollama is running, refresh Streamlit and rerun your prompt.
-"""
-
-
-def ollama_model_missing_message():
-    return f"""
-Ollama is running, but the selected model is not installed:
-{OLLAMA_MODEL}
-
-Install it with:
-ollama pull {OLLAMA_MODEL}
-
-Recommended smaller models for this machine:
-- llama3.2:1b
-- qwen2.5-coder:1.5b
-"""
-
-
-def ollama_memory_error_message(error_text):
-    return f"""
-Ollama started, but the selected model does not fit in currently available memory.
-
-Selected model:
-{OLLAMA_MODEL}
-
-Error:
-{error_text}
-
-Use a smaller model, for example:
-ollama pull llama3.2:1b
-ollama run llama3.2:1b
-
-Then choose llama3.2:1b in the Streamlit sidebar and retry.
-"""
-
-
-def invoke_llm(prompt):
-    if not is_ollama_available():
-        raise RuntimeError(ollama_unavailable_message())
-
-    if not is_ollama_model_installed(OLLAMA_MODEL):
-        raise RuntimeError(ollama_model_missing_message())
-
-    try:
-        return llm.invoke(prompt)
-    except Exception as e:
-        error_text = str(e)
-
-        if "localhost" in error_text and "11434" in error_text:
-            raise RuntimeError(ollama_unavailable_message()) from e
-
-        if "requires more system memory" in error_text:
-            raise RuntimeError(ollama_memory_error_message(error_text)) from e
-
-        raise
 
 
 AGENT_HELP_TEXT = """
@@ -196,291 +127,6 @@ AI Coding Agent commands:
 
 - reset database <project_name>
   Stop the selected app and delete its local SQLite database file.
-"""
-
-
-APP_INTENT_WORDS = [
-    "app",
-    "application",
-    "dashboard",
-    "tracker",
-    "system",
-    "portal",
-    "website",
-    "crm",
-    "todo",
-    "notes",
-    "inventory",
-    "manager",
-]
-
-
-BUILD_INTENT_WORDS = [
-    "build",
-    "create",
-    "make",
-    "generate",
-    "develop",
-    "need",
-    "want",
-]
-
-
-SUPPORTED_APP_STACKS = {
-    "react_flask_sqlite": {
-        "label": "React + Flask + SQLite",
-        "aliases": ["flask", "python", "react flask", "react + flask"],
-        "frontend_url": "http://127.0.0.1:5173",
-        "backend_url": "http://127.0.0.1:5000",
-        "required_files": [
-            "backend/app.py",
-            "backend/routes.py",
-            "backend/database.py",
-            "backend/models.py",
-            "backend/requirements.txt",
-            "frontend/package.json",
-            "frontend/src/App.jsx",
-            "frontend/src/api.js",
-        ],
-    },
-    "react_dotnet_sqlite": {
-        "label": "React + ASP.NET Core + SQLite",
-        "aliases": [".net", "dotnet", "asp.net", "c#"],
-        "frontend_url": "http://127.0.0.1:5173",
-        "backend_url": "http://127.0.0.1:5000",
-        "required_files": [
-            "backend/GeneratedApp.Api.csproj",
-            "backend/Program.cs",
-            "frontend/package.json",
-            "frontend/src/App.jsx",
-            "frontend/src/api.js",
-        ],
-    },
-    "react_php_sqlite": {
-        "label": "React + PHP + SQLite",
-        "aliases": ["php"],
-        "frontend_url": "http://127.0.0.1:5173",
-        "backend_url": "http://127.0.0.1:8000",
-        "required_files": [
-            "backend/index.php",
-            "backend/database.php",
-            "frontend/package.json",
-            "frontend/src/App.jsx",
-            "frontend/src/api.js",
-        ],
-    },
-}
-
-
-def clean_code_output(text):
-    text = text.replace("```python", "")
-    text = text.replace("```html", "")
-    text = text.replace("```css", "")
-    text = text.replace("```javascript", "")
-    text = text.replace("```jsx", "")
-    text = text.replace("```json", "")
-    text = text.replace("```", "")
-    return text.strip()
-
-
-def make_safe_project_name(text):
-    text = text.lower()
-    text = re.sub(r"[^a-z0-9]+", "_", text)
-    text = text.strip("_")
-    return text[:45] or "generated_app"
-
-
-def strip_command_prefix(text, prefix):
-    pattern = rf"^\s*{re.escape(prefix)}\s*"
-    return re.sub(pattern, "", text, flags=re.IGNORECASE).strip()
-
-
-def detect_requested_stack(user_input):
-    text = user_input.lower()
-
-    for stack_key, stack in SUPPORTED_APP_STACKS.items():
-        if any(alias in text for alias in stack["aliases"]):
-            return stack_key
-
-    return "react_flask_sqlite"
-
-
-def get_stack(stack_key):
-    return SUPPORTED_APP_STACKS.get(stack_key, SUPPORTED_APP_STACKS["react_flask_sqlite"])
-
-
-def get_project_stack_key(project_name):
-    spec_path = os.path.join(WORKSPACE_DIR, project_name, "project_spec.json")
-
-    if not os.path.exists(spec_path):
-        return "react_flask_sqlite"
-
-    try:
-        with open(spec_path, "r", encoding="utf-8") as f:
-            spec = json.load(f)
-
-        stack_key = spec.get("stack_key")
-
-        if stack_key in SUPPORTED_APP_STACKS:
-            return stack_key
-
-        app_type = spec.get("app_type", "").lower()
-
-        for candidate_key, stack in SUPPORTED_APP_STACKS.items():
-            if stack["label"].lower() == app_type:
-                return candidate_key
-
-    except Exception:
-        pass
-
-    return "react_flask_sqlite"
-
-
-def build_stack_instruction(stack_key, project_config=None):
-    stack = get_stack(stack_key)
-    project_config = project_config or {
-        "frontend_url": stack["frontend_url"],
-        "backend_url": stack["backend_url"],
-        "frontend_port": stack["frontend_url"].rsplit(":", 1)[-1],
-        "backend_port": stack["backend_url"].rsplit(":", 1)[-1],
-    }
-    frontend_url = project_config["frontend_url"]
-    backend_url = project_config["backend_url"]
-    frontend_port = project_config["frontend_port"]
-    backend_port = project_config["backend_port"]
-
-    if stack_key == "react_dotnet_sqlite":
-        return f"""
-STRICT FORMAT:
-
-file: backend/GeneratedApp.Api.csproj
-<xml>
-
-file: backend/Program.cs
-<csharp code>
-
-file: frontend/package.json
-<json>
-
-file: frontend/index.html
-<html>
-
-file: frontend/src/main.jsx
-<jsx>
-
-file: frontend/src/App.jsx
-<jsx>
-
-file: frontend/src/api.js
-<javascript>
-
-file: frontend/src/style.css
-<css>
-
-Rules:
-- Backend must use ASP.NET Core Minimal API
-- Backend must use SQLite through Microsoft.Data.Sqlite
-- Backend must expose JSON API routes at /api/items
-- Backend must enable CORS for {frontend_url}
-- Backend must run on {backend_url}
-- Frontend must use React + Vite and fetch
-- Frontend must call backend API at {backend_url}
-- Keep code simple and runnable
-"""
-
-    if stack_key == "react_php_sqlite":
-        return f"""
-STRICT FORMAT:
-
-file: backend/index.php
-<php code>
-
-file: backend/database.php
-<php code>
-
-file: frontend/package.json
-<json>
-
-file: frontend/index.html
-<html>
-
-file: frontend/src/main.jsx
-<jsx>
-
-file: frontend/src/App.jsx
-<jsx>
-
-file: frontend/src/api.js
-<javascript>
-
-file: frontend/src/style.css
-<css>
-
-Rules:
-- Backend must use plain PHP
-- Backend must use SQLite through PDO
-- Backend must expose JSON API routes at /api/items
-- Backend must handle CORS and OPTIONS requests
-- Backend must run with php -S 127.0.0.1:{backend_port} -t backend
-- Frontend must use React + Vite and fetch
-- Frontend must call backend API at {backend_url}
-- Keep code simple and runnable
-"""
-
-    return f"""
-STRICT FORMAT:
-
-file: backend/app.py
-<python code>
-
-file: backend/routes.py
-<python code>
-
-file: backend/database.py
-<python code>
-
-file: backend/models.py
-<python code>
-
-file: backend/requirements.txt
-<requirements>
-
-file: frontend/package.json
-<json>
-
-file: frontend/index.html
-<html>
-
-file: frontend/src/main.jsx
-<jsx>
-
-file: frontend/src/App.jsx
-<jsx>
-
-file: frontend/src/api.js
-<javascript>
-
-file: frontend/src/style.css
-<css>
-
-Rules:
-- Backend must use Flask
-- Backend must use sqlite3 only
-- Backend must expose JSON API routes
-- Backend must handle CORS manually, do not use flask_cors
-- Backend must run on {backend_url}
-- Frontend must use React + Vite
-- Frontend must call backend API at {backend_url}
-- Do NOT use external UI libraries
-- Do NOT use @heroicons/react
-- Do NOT use lucide-react
-- Do NOT use framer-motion
-- Do NOT use Material UI or MUI
-- Do NOT use Tailwind CSS
-- Use only React, ReactDOM, Vite, plain CSS, and fetch
-- Do not import any frontend package that is not listed in package.json
-- package.json must only contain react, react-dom, vite, and @vitejs/plugin-react
-- Keep code simple and runnable
 """
 
 
@@ -1096,59 +742,6 @@ STANDALONE FILES:
 """
 
 
-def looks_like_app_build_request(user_input):
-    text = user_input.lower()
-    has_app_word = any(word in text for word in APP_INTENT_WORDS)
-    has_build_word = any(word in text for word in BUILD_INTENT_WORDS)
-    return has_app_word and has_build_word
-
-
-def list_supported_stacks():
-    lines = []
-
-    for stack_key, stack in SUPPORTED_APP_STACKS.items():
-        lines.append(f"- {stack_key}: {stack['label']}")
-
-    return "Supported app stacks:\n\n" + "\n".join(lines)
-
-
-def write_project(project_name, files_dict):
-    base_path = os.path.join(WORKSPACE_DIR, project_name)
-    os.makedirs(base_path, exist_ok=True)
-
-    for file_name, content in files_dict.items():
-        file_path = os.path.join(base_path, file_name)
-        folder = os.path.dirname(file_path)
-
-        if folder:
-            os.makedirs(folder, exist_ok=True)
-
-        with open(file_path, "w", encoding="utf-8") as f:
-            f.write(clean_code_output(content))
-
-    return base_path
-
-
-def parse_llm_project_output(text):
-    files = {}
-    text = clean_code_output(text)
-
-    pattern = r"(?:file:\s*|#\s*)([\w\.\/]+)\n(.*?)(?=(?:file:\s*|#\s*)[\w\.\/]+\n|\Z)"
-    matches = re.findall(pattern, text, re.DOTALL | re.IGNORECASE)
-
-    for file_name, content in matches:
-        files[file_name.strip()] = clean_code_output(content)
-
-    return files
-
-
-def detect_broken_file(error_text):
-    matches = re.findall(r'File "(.+?)"', error_text)
-    if not matches:
-        return None
-    return matches[-1]
-
-
 def generate_flask_project(user_input):
     prompt = f"""
 You are a Flask web app generator.
@@ -1295,32 +888,6 @@ Rules:
 - No explanation
 """
     return clean_code_output(invoke_llm(prompt))
-
-
-def find_python_syntax_error(project_name):
-    project_path = os.path.join(WORKSPACE_DIR, project_name)
-
-    for root, dirs, files in os.walk(project_path):
-        dirs[:] = [d for d in dirs if d not in ["__pycache__", ".git", "venv", "node_modules"]]
-
-        for file in files:
-            if not file.endswith(".py"):
-                continue
-
-            file_path = os.path.join(root, file)
-
-            try:
-                with open(file_path, "r", encoding="utf-8") as f:
-                    code = f.read()
-                ast.parse(code)
-
-            except SyntaxError as e:
-                return file_path, str(e)
-
-            except Exception:
-                continue
-
-    return None, None
 
 
 def validate_flask_structure(project_name):
@@ -1752,7 +1319,7 @@ def self_heal_project(project_name, entry_file):
 
         if result["returncode"] == 0:
             return f"""
-✅ PROJECT RUN SUCCESSFUL
+âœ… PROJECT RUN SUCCESSFUL
 
 HEALED FILES:
 {chr(10).join(healed_files)}
@@ -1765,7 +1332,7 @@ OUTPUT:
 
         if not broken_file:
             return f"""
-❌ AUTO HEAL FAILED
+âŒ AUTO HEAL FAILED
 
 ERROR:
 {result["combined"]}
@@ -1783,7 +1350,7 @@ ERROR:
         healed_files.append(broken_file)
 
     return f"""
-❌ AUTO HEAL FAILED AFTER {max_attempts} ATTEMPTS
+âŒ AUTO HEAL FAILED AFTER {max_attempts} ATTEMPTS
 """
 
 def detect_frontend_broken_file(frontend_logs, project_name):
@@ -1883,7 +1450,7 @@ def heal_fullstack_project(project_name):
         restart_fullstack_project(project_name)
 
         return f"""
-✅ FULLSTACK HEAL COMPLETE
+âœ… FULLSTACK HEAL COMPLETE
 
 ACTIONS:
 {chr(10).join(actions)}
@@ -1918,7 +1485,7 @@ INSTALL OUTPUT:
         restart_fullstack_project(project_name)
 
         return f"""
-✅ FULLSTACK HEAL COMPLETE
+âœ… FULLSTACK HEAL COMPLETE
 
 ACTIONS:
 {chr(10).join(actions)}
@@ -1962,7 +1529,7 @@ INSTALL OUTPUT:
                 restart_fullstack_project(project_name)
 
                 return f"""
-✅ FULLSTACK HEAL COMPLETE
+âœ… FULLSTACK HEAL COMPLETE
 
 ACTIONS:
 {chr(10).join(actions)}
@@ -1976,7 +1543,7 @@ HEALED FILES:
 
             except Exception as e:
                 return f"""
-❌ BACKEND HEAL FAILED
+âŒ BACKEND HEAL FAILED
 
 FILE:
 {broken_file}
@@ -1999,7 +1566,7 @@ ERROR:
 
         if not broken_frontend_file:
             return f"""
-⚠️ FRONTEND ERROR DETECTED
+âš ï¸ FRONTEND ERROR DETECTED
 
 Could not detect broken frontend file.
 
@@ -2032,7 +1599,7 @@ LOGS:
             restart_fullstack_project(project_name)
 
             return f"""
-✅ FULLSTACK HEAL COMPLETE
+âœ… FULLSTACK HEAL COMPLETE
 
 ACTIONS:
 {chr(10).join(actions)}
@@ -2046,7 +1613,7 @@ HEALED FILES:
 
         except Exception as e:
             return f"""
-❌ FRONTEND HEAL FAILED
+âŒ FRONTEND HEAL FAILED
 
 FILE:
 {broken_frontend_file}
@@ -2056,7 +1623,7 @@ ERROR:
 """
 
     return """
-✅ NO HEALING NEEDED
+âœ… NO HEALING NEEDED
 
 No backend or frontend errors found in logs.
 """
@@ -2175,617 +1742,15 @@ Return a clear review with:
     return invoke_llm(prompt)
 
 
-def singularize_entity_name(name):
-    name = name.strip().lower()
-
-    if name.endswith("ies"):
-        return name[:-3] + "y"
-
-    if name.endswith("s") and not name.endswith("ss"):
-        return name[:-1]
-
-    return name or "record"
-
-
-def detect_domain_entity(requirement):
-    text = requirement.lower()
-
-    domain_candidates = [
-        ("customer", "customers"),
-        ("crm", "customers"),
-        ("client", "customers"),
-        ("note", "notes"),
-        ("task", "tasks"),
-        ("todo", "tasks"),
-        ("lead", "leads"),
-        ("sales", "leads"),
-        ("inventory", "products"),
-        ("product", "products"),
-        ("order", "orders"),
-        ("employee", "employees"),
-        ("student", "students"),
-        ("expense", "expenses"),
-        ("invoice", "invoices"),
-    ]
-
-    for keyword, entity_name in domain_candidates:
-        if keyword in text:
-            return entity_name
-
-    return "records"
-
-
-def detect_entity_fields(requirement, entity_name):
-    text = requirement.lower()
-    fields = ["id"]
-
-    if entity_name == "customers":
-        fields.extend(["name", "email", "phone", "notes"])
-    elif entity_name == "notes":
-        fields.extend(["title", "description"])
-    elif entity_name == "tasks":
-        fields.extend(["title", "description", "status"])
-    elif entity_name == "leads":
-        fields.extend(["name", "email", "phone", "status", "notes"])
-    elif entity_name == "products":
-        fields.extend(["name", "description", "quantity", "price"])
-    else:
-        fields.extend(["title", "description"])
-
-    optional_field_keywords = {
-        "name": ["name"],
-        "email": ["email"],
-        "phone": ["phone"],
-        "notes": ["note", "notes"],
-        "description": ["description", "details"],
-        "status": ["status"],
-        "due_date": ["due date", "deadline"],
-        "priority": ["priority"],
-        "price": ["price", "cost"],
-        "quantity": ["quantity", "stock"],
-        "category": ["category"],
-    }
-
-    for field_name, keywords in optional_field_keywords.items():
-        if entity_name == "notes" and field_name == "notes":
-            continue
-
-        if any(keyword in text for keyword in keywords) and field_name not in fields:
-            fields.append(field_name)
-
-    return fields
-
-
-def get_stack_build_steps(stack_key):
-    if stack_key == "react_dotnet_sqlite":
-        return [
-            "Create ASP.NET Core Minimal API backend",
-            "Create SQLite persistence with Microsoft.Data.Sqlite",
-            "Create React Vite frontend",
-            "Connect frontend fetch calls to assigned backend URL",
-            "Run frontend build and backend API validation"
-        ]
-
-    if stack_key == "react_php_sqlite":
-        return [
-            "Create plain PHP JSON API backend",
-            "Create SQLite persistence with PDO",
-            "Create React Vite frontend",
-            "Connect frontend fetch calls to assigned backend URL",
-            "Run frontend build and backend API validation"
-        ]
-
-    return [
-        "Create Flask JSON API backend",
-        "Create SQLite persistence with sqlite3",
-        "Create React Vite frontend",
-        "Connect frontend fetch calls to assigned backend URL",
-        "Run frontend build and backend API validation"
-    ]
-
-
-def create_fallback_project_spec(project_name, requirement, stack_key):
-    stack = get_stack(stack_key)
-    entity_name = detect_domain_entity(requirement or project_name)
-    singular_name = singularize_entity_name(entity_name)
-    fields = detect_entity_fields(requirement or project_name, entity_name)
-    display_name = project_name.replace("_", " ").title()
-
-    return {
-        "app_name": project_name,
-        "display_name": display_name,
-        "stack_key": stack_key,
-        "app_type": stack["label"],
-        "description": f"A {stack['label']} application for managing {entity_name}.",
-        "resource_name": entity_name,
-        "primary_entity": singular_name,
-        "entities": [
-            {
-                "name": entity_name,
-                "singular_name": singular_name,
-                "fields": fields,
-                "required_fields": [
-                    field
-                    for field in fields
-                    if field in ["name", "title"]
-                ],
-                "searchable_fields": [
-                    field
-                    for field in fields
-                    if field not in ["id", "price", "quantity"]
-                ]
-            }
-        ],
-        "features": [
-            f"Create {entity_name}",
-            f"List {entity_name}",
-            f"Persist {entity_name} in SQLite",
-            f"Validate required {singular_name} fields",
-            f"Search {entity_name}"
-        ],
-        "database_tables": [
-            {
-                "table_name": "items",
-                "entity": entity_name,
-                "fields": fields
-            }
-        ],
-        "api_base_path": "/api/items",
-        "api_routes": [
-            {
-                "route_name": "/api/items",
-                "method": "GET",
-                "purpose": f"List {entity_name}"
-            },
-            {
-                "route_name": "/api/items",
-                "method": "POST",
-                "purpose": f"Create a {singular_name}"
-            }
-        ],
-        "frontend_pages": [
-            {
-                "name": "Dashboard",
-                "purpose": f"Manage {entity_name}"
-            }
-        ],
-        "validation_rules": [
-            "Frontend package must build successfully",
-            "Backend GET /api/items must return JSON",
-            "Backend POST /api/items must persist a record",
-            "Frontend api.js must call the assigned backend URL",
-            "Inserted data must remain after backend restart"
-        ],
-        "build_steps": get_stack_build_steps(stack_key),
-        "test_plan": [
-            "Run validate app after build",
-            "Create a sample record from the frontend",
-            "Refresh the frontend and confirm data remains",
-            "Restart fullstack app and confirm persistence"
-        ]
-    }
-
-
-def is_fallback_description(description):
-    return "fallback because model returned invalid json" in str(description).lower()
-
-
-def is_string_list(value):
-    return isinstance(value, list) and all(isinstance(item, str) for item in value)
-
-
-def normalize_api_routes(value, fallback_routes):
-    if not isinstance(value, list):
-        return fallback_routes
-
-    routes = []
-
-    for route in value:
-        if not isinstance(route, dict):
-            continue
-
-        route_name = route.get("route_name") or route.get("route_path") or route.get("path")
-        method = str(route.get("method", "")).upper()
-
-        if not route_name or method not in ["GET", "POST", "PUT", "PATCH", "DELETE"]:
-            continue
-
-        routes.append({
-            "route_name": route_name,
-            "method": method,
-            "purpose": route.get("purpose", "")
-        })
-
-    expected_methods = {
-        route["method"]
-        for route in routes
-        if route.get("route_name") == "/api/items"
-    }
-
-    if not {"GET", "POST"}.issubset(expected_methods):
-        return fallback_routes
-
-    return routes
-
-
-def normalize_frontend_pages(value, fallback_pages):
-    if not isinstance(value, list):
-        return fallback_pages
-
-    pages = []
-
-    for page in value:
-        if isinstance(page, str):
-            pages.append({
-                "name": page,
-                "purpose": ""
-            })
-        elif isinstance(page, dict):
-            name = page.get("name") or page.get("page_name")
-
-            if name:
-                if any(term in name.lower() for term in ["login", "register", "registration"]):
-                    return fallback_pages
-
-                pages.append({
-                    "name": name,
-                    "purpose": page.get("purpose", "")
-                })
-
-    return pages or fallback_pages
-
-
-def normalize_project_spec(project_name, requirement, spec_json, stack_key):
-    fallback_spec = create_fallback_project_spec(project_name, requirement, stack_key)
-
-    if not isinstance(spec_json, dict):
-        spec_json = {}
-
-    normalized = dict(fallback_spec)
-    normalized.update({
-        key: value
-        for key, value in spec_json.items()
-        if value not in [None, "", [], {}]
-    })
-
-    if normalized.get("stack_key") not in SUPPORTED_APP_STACKS:
-        normalized["stack_key"] = stack_key
-
-    normalized["app_name"] = project_name
-    normalized["app_type"] = get_stack(normalized["stack_key"])["label"]
-
-    if is_fallback_description(normalized.get("description")):
-        normalized["description"] = fallback_spec["description"]
-
-    if (
-        normalized.get("resource_name") == "records"
-        and fallback_spec["resource_name"] != "records"
-    ):
-        normalized["resource_name"] = fallback_spec["resource_name"]
-        normalized["primary_entity"] = fallback_spec["primary_entity"]
-
-        if (
-            normalized.get("entities")
-            and isinstance(normalized["entities"][0], dict)
-            and normalized["entities"][0].get("name") == "records"
-        ):
-            normalized["entities"] = fallback_spec["entities"]
-
-    if not normalized.get("entities"):
-        normalized["entities"] = fallback_spec["entities"]
-
-    if not normalized.get("database_tables"):
-        normalized["database_tables"] = fallback_spec["database_tables"]
-
-    normalized["resource_name"] = normalized.get("resource_name") or fallback_spec["resource_name"]
-    normalized["primary_entity"] = normalized.get("primary_entity") or fallback_spec["primary_entity"]
-    features = normalized.get("features")
-    has_generic_record_features = (
-        normalized.get("resource_name") != "records"
-        and is_string_list(features)
-        and any("record" in feature.lower() for feature in features)
-    )
-    normalized["features"] = (
-        features
-        if is_string_list(features) and not has_generic_record_features
-        else fallback_spec["features"]
-    )
-    normalized["validation_rules"] = (
-        normalized["validation_rules"]
-        if is_string_list(normalized.get("validation_rules"))
-        else fallback_spec["validation_rules"]
-    )
-    normalized["test_plan"] = (
-        normalized["test_plan"]
-        if is_string_list(normalized.get("test_plan"))
-        else fallback_spec["test_plan"]
-    )
-    normalized["api_base_path"] = "/api/items"
-    normalized["api_routes"] = normalize_api_routes(
-        normalized.get("api_routes"),
-        fallback_spec["api_routes"]
-    )
-    normalized["frontend_pages"] = normalize_frontend_pages(
-        normalized.get("frontend_pages"),
-        fallback_spec["frontend_pages"]
-    )
-    normalized["build_steps"] = get_stack_build_steps(normalized["stack_key"])
-
-    project_config = ensure_project_config(project_name, normalized["stack_key"])
-    normalized["run_urls"] = {
-        "frontend": project_config["frontend_url"],
-        "backend": project_config["backend_url"]
-    }
-    normalized["ports"] = {
-        "frontend": project_config["frontend_port"],
-        "backend": project_config["backend_port"]
-    }
-
-    return normalized
-
-
-def refresh_project_spec(project_name):
-    project_path = os.path.join(WORKSPACE_DIR, project_name)
-    spec_path = os.path.join(project_path, "project_spec.json")
-
-    if not os.path.exists(project_path):
-        return f"Project not found: {project_name}"
-
-    stack_key = get_project_stack_key(project_name)
-
-    try:
-        with open(spec_path, "r", encoding="utf-8") as f:
-            existing_spec = json.load(f)
-    except Exception:
-        existing_spec = {}
-
-    description = existing_spec.get("description", "")
-    requirement = project_name if is_fallback_description(description) else description or project_name
-    normalized_spec = normalize_project_spec(
-        project_name,
-        requirement,
-        existing_spec,
-        stack_key
-    )
-
-    with open(spec_path, "w", encoding="utf-8") as f:
-        json.dump(normalized_spec, f, indent=4)
-
-    log_project_activity(
-        project_name,
-        "PROJECT_SPEC_REFRESHED",
-        "Normalized project_spec.json with stack-aware schema."
-    )
-
-    return f"""
-PROJECT SPEC REFRESHED
-
-PROJECT:
-{project_name}
-
-SPEC FILE:
-project_spec.json
-
-STACK:
-{normalized_spec["app_type"]}
-
-RESOURCE:
-{normalized_spec["resource_name"]}
-
-RUN URLS:
-Frontend: {normalized_spec["run_urls"]["frontend"]}
-Backend: {normalized_spec["run_urls"]["backend"]}
-"""
-
-
-def create_app_plan(user_input, stack_key=None):
-    stack_key = stack_key or detect_requested_stack(user_input)
-    stack = get_stack(stack_key)
-
-    prompt = f"""
-You are a senior software architect.
-
-Convert this app requirement into a clear build plan.
-
-USER REQUIREMENT:
-{user_input}
-
-TARGET STACK:
-{stack["label"]}
-
-Return ONLY valid JSON.
-
-JSON format:
-{{
-  "app_name": "",
-  "display_name": "",
-  "stack_key": "{stack_key}",
-  "app_type": "{stack["label"]}",
-  "description": "",
-  "resource_name": "",
-  "primary_entity": "",
-  "entities": [
-    {{
-      "name": "",
-      "singular_name": "",
-      "fields": [],
-      "required_fields": [],
-      "searchable_fields": []
-    }}
-  ],
-  "features": [],
-  "database_tables": [],
-  "api_base_path": "/api/items",
-  "api_routes": [],
-  "frontend_pages": [],
-  "validation_rules": [],
-  "build_steps": [],
-  "test_plan": [],
-  "run_urls": {{}},
-  "ports": {{}}
-}}
-
-Rules:
-- No markdown
-- No explanation
-- JSON only
-- app_type must be exactly "{stack["label"]}"
-- stack_key must be exactly "{stack_key}"
-"""
-
-    response = invoke_llm(prompt)
-
-    response = clean_code_output(response)
-
-    return response
-
-
-def save_project_spec(project_name, spec_text, stack_key="react_flask_sqlite", requirement=""):
-
-    project_path = os.path.join(WORKSPACE_DIR, project_name)
-
-    os.makedirs(project_path, exist_ok=True)
-
-    spec_path = os.path.join(project_path, "project_spec.json")
-
-    try:
-        spec_json = json.loads(spec_text)
-
-    except Exception:
-        spec_json = {}
-
-    spec_json = normalize_project_spec(
-        project_name,
-        requirement or project_name,
-        spec_json,
-        stack_key
-    )
-
-    with open(spec_path, "w", encoding="utf-8") as f:
-        json.dump(spec_json, f, indent=4)
-
-    return spec_path
-
-def plan_app(user_input):
-
-    stack_key = detect_requested_stack(user_input)
-    plan_text = create_app_plan(user_input, stack_key)
-
-    requirement = strip_command_prefix(user_input, "plan app")
-    project_name = make_safe_project_name(requirement)
-
-    spec_path = save_project_spec(project_name, plan_text, stack_key, requirement)
-
-    with open(spec_path, "r", encoding="utf-8") as f:
-        clean_plan = f.read()
-
-    log_project_activity(
-        project_name,
-        "APP_PLAN_CREATED",
-        f"Spec saved to: {spec_path}"
-    )
-
-    return f"""
-✅ APP PLAN CREATED
-
-PROJECT:
-workspace/{project_name}
-
-SPEC FILE:
-project_spec.json
-
-PLAN:
-{clean_plan}
-"""
 
 def build_from_plan(project_name):
-
-    project_path = os.path.join(WORKSPACE_DIR, project_name)
-    spec_path = os.path.join(project_path, "project_spec.json")
-
-    if not os.path.exists(spec_path):
-        return f"project_spec.json not found for project: {project_name}"
-
-    with open(spec_path, "r", encoding="utf-8") as f:
-        spec = f.read()
-
-    stack_key = get_project_stack_key(project_name)
-    stack = get_stack(stack_key)
-    project_config = ensure_project_config(project_name, stack_key)
-    stack_instruction = build_stack_instruction(stack_key, project_config)
-
-    prompt = f"""
-You are a full-stack {stack["label"]} project builder.
-
-Build a complete working app from this project specification.
-
-PROJECT NAME:
-{project_name}
-
-PROJECT SPEC:
-{spec}
-
-Return ONLY raw project files.
-
-{stack_instruction}
-
-Universal rules:
-- No markdown
-- No explanation
-- Every file must start with file:
-- Do not generate files outside the requested project structure
-"""
-
-    response = invoke_llm(prompt)
-
-    files_dict = parse_llm_project_output(response)
-
-    if not files_dict:
-        files_dict = create_fallback_project_files(stack_key)
-    elif stack_key != "react_flask_sqlite":
-        fallback_files = create_fallback_project_files(stack_key)
-
-        for required_file in stack["required_files"]:
-            if required_file not in files_dict and required_file in fallback_files:
-                files_dict[required_file] = fallback_files[required_file]
-
-    files_dict = apply_project_ports_to_files(files_dict, project_config, stack_key)
-
-    write_project(project_name, files_dict)
-
-    if stack_key == "react_flask_sqlite":
-        structure_fixes = validate_fullstack_structure(project_name)
-    else:
-        structure_fixes = []
-
-    standalone_files = create_standalone_project_files(project_name)
-
-    log_project_activity(
+    return agent_builder.build_from_plan(
         project_name,
-        "BUILT_FROM_PLAN",
-        f"Files:\n{chr(10).join(files_dict.keys())}"
+        create_fallback_project_files,
+        apply_project_ports_to_files,
+        validate_fullstack_structure,
+        create_standalone_project_files,
     )
-
-    create_project_snapshot(project_name)
-
-    return f"""
-✅ PROJECT BUILT FROM PLAN
-
-PROJECT:
-workspace/{project_name}
-
-FILES:
-{chr(10).join(files_dict.keys())}
-
-STRUCTURE FIXES:
-{chr(10).join(structure_fixes) if structure_fixes else "None"}
-
-STANDALONE FILES:
-{chr(10).join(standalone_files)}
-
-SNAPSHOT:
-Created after build
-"""
 
 
 def basic_project_quality_check(project_name):
@@ -2879,13 +1844,13 @@ def create_app_workflow(user_input):
     snapshot_result = create_project_snapshot(project_name)
 
     if (
-        "❌" in quality_check_result
+        "âŒ" in quality_check_result
         or "NEEDS ATTENTION" in quality_check_result
         or "NEEDS FIX" in quality_check_result
     ):
-        final_status = "❌ NEEDS ATTENTION"
+        final_status = "âŒ NEEDS ATTENTION"
     else:
-        final_status = "✅ READY"
+        final_status = "âœ… READY"
 
     log_project_activity(
         project_name,
@@ -2894,7 +1859,7 @@ def create_app_workflow(user_input):
     )
 
     return f"""
-🚀 CREATE APP WORKFLOW COMPLETE
+ðŸš€ CREATE APP WORKFLOW COMPLETE
 
 PROJECT:
 workspace/{project_name}
@@ -2961,7 +1926,7 @@ def heal_preflight_project(project_name):
     for relative_file in python_files:
         file_name = os.path.basename(relative_file)
 
-        if f"❌ PYTHON ERROR: {file_name}" in preflight_result:
+        if f"âŒ PYTHON ERROR: {file_name}" in preflight_result:
             file_path = os.path.join(project_path, relative_file)
 
             with open(file_path, "r", encoding="utf-8") as f:
@@ -3048,7 +2013,7 @@ def init_db():
     )
 
     return f"""
-🛠️ PREFLIGHT HEAL COMPLETE
+ðŸ› ï¸ PREFLIGHT HEAL COMPLETE
 
 PROJECT:
 {project_name}
@@ -3147,15 +2112,15 @@ def validate_api_contract(project_name):
     if missing_in_backend:
         for route in missing_in_backend:
             results.append(
-                f"❌ Frontend calls {route}, but backend route is missing."
+                f"âŒ Frontend calls {route}, but backend route is missing."
             )
     else:
-        results.append("✅ All frontend routes exist in backend.")
+        results.append("âœ… All frontend routes exist in backend.")
 
     if unused_backend:
         for route in unused_backend:
             results.append(
-                f"⚠️ Backend route {route} is not used by frontend."
+                f"âš ï¸ Backend route {route} is not used by frontend."
             )
 
     log_project_activity(
@@ -3165,7 +2130,7 @@ def validate_api_contract(project_name):
     )
 
     return f"""
-🔗 API CONTRACT REPORT
+ðŸ”— API CONTRACT REPORT
 
 PROJECT:
 {project_name}
@@ -3255,7 +2220,7 @@ export async function addItem(item) {
     )
 
     return f"""
-🛠️ CONTRACT FIX COMPLETE
+ðŸ› ï¸ CONTRACT FIX COMPLETE
 
 PROJECT:
 {project_name}
@@ -3292,9 +2257,9 @@ def validate_database_schema(project_name):
     issues = []
 
     if "CREATE TABLE IF NOT EXISTS items" not in database_code:
-        issues.append("❌ Missing items table in database.py")
+        issues.append("âŒ Missing items table in database.py")
     else:
-        issues.append("✅ items table exists")
+        issues.append("âœ… items table exists")
 
     required_columns = ["id", "title", "description"]
 
@@ -3315,11 +2280,11 @@ def validate_database_schema(project_name):
 
         if column not in table_definition:
             issues.append(
-                 f"❌ Missing column in database.py: {column}"
+                 f"âŒ Missing column in database.py: {column}"
             )
         else:
             issues.append(
-                f"✅ Column found in database.py: {column}"
+                f"âœ… Column found in database.py: {column}"
             )
 
     model_requirements = [
@@ -3331,9 +2296,9 @@ def validate_database_schema(project_name):
 
     for requirement in model_requirements:
         if requirement not in models_code:
-            issues.append(f"❌ Missing in models.py: {requirement}")
+            issues.append(f"âŒ Missing in models.py: {requirement}")
         else:
-            issues.append(f"✅ Found in models.py: {requirement}")
+            issues.append(f"âœ… Found in models.py: {requirement}")
 
     log_project_activity(
         project_name,
@@ -3342,7 +2307,7 @@ def validate_database_schema(project_name):
     )
 
     return f"""
-🗄 DATABASE SCHEMA REPORT
+ðŸ—„ DATABASE SCHEMA REPORT
 
 PROJECT:
 {project_name}
@@ -3430,7 +2395,7 @@ def add_item(title, description="", email="", phone=""):
     )
 
     return f"""
-🛠️ DATABASE SCHEMA FIX COMPLETE
+ðŸ› ï¸ DATABASE SCHEMA FIX COMPLETE
 
 PROJECT:
 {project_name}
@@ -3467,10 +2432,10 @@ def test_runtime_endpoints(project_name):
     results = []
 
     if not wait_for_backend(base_url):
-        results.append("❌ Backend did not start after waiting.")
+        results.append("âŒ Backend did not start after waiting.")
 
         return f"""
-    🧪 RUNTIME ENDPOINT TEST
+    ðŸ§ª RUNTIME ENDPOINT TEST
 
     PROJECT:
     {project_name}
@@ -3486,12 +2451,12 @@ def test_runtime_endpoints(project_name):
             status = response.status
 
         if status == 200:
-            results.append("✅ GET /api/items passed")
+            results.append("âœ… GET /api/items passed")
         else:
-            results.append(f"❌ GET /api/items failed with status {status}")
+            results.append(f"âŒ GET /api/items failed with status {status}")
 
     except Exception as e:
-        results.append(f"❌ GET /api/items failed: {e}")
+        results.append(f"âŒ GET /api/items failed: {e}")
 
     # Test POST /api/items
     try:
@@ -3514,12 +2479,12 @@ def test_runtime_endpoints(project_name):
             status = response.status
 
         if status in [200, 201]:
-            results.append("✅ POST /api/items passed")
+            results.append("âœ… POST /api/items passed")
         else:
-            results.append(f"❌ POST /api/items failed with status {status}")
+            results.append(f"âŒ POST /api/items failed with status {status}")
 
     except Exception as e:
-        results.append(f"❌ POST /api/items failed: {e}")
+        results.append(f"âŒ POST /api/items failed: {e}")
 
     # Verify insert by reading again
     try:
@@ -3527,12 +2492,12 @@ def test_runtime_endpoints(project_name):
             body = response.read().decode("utf-8")
 
         if "Runtime test item" in body:
-            results.append("✅ Database insert verified")
+            results.append("âœ… Database insert verified")
         else:
-            results.append("⚠️ POST succeeded, but inserted item was not found in GET response")
+            results.append("âš ï¸ POST succeeded, but inserted item was not found in GET response")
 
     except Exception as e:
-        results.append(f"❌ Insert verification failed: {e}")
+        results.append(f"âŒ Insert verification failed: {e}")
 
     log_project_activity(
         project_name,
@@ -3541,7 +2506,7 @@ def test_runtime_endpoints(project_name):
     )
 
     return f"""
-🧪 RUNTIME ENDPOINT TEST
+ðŸ§ª RUNTIME ENDPOINT TEST
 
 PROJECT:
 {project_name}
@@ -3574,7 +2539,7 @@ def validate_backend_imports(project_name):
 
     for bad_import in bad_imports:
         if bad_import in app_code:
-            issues.append(f"❌ Bad backend import found: {bad_import}")
+            issues.append(f"âŒ Bad backend import found: {bad_import}")
 
     required_checks = [
         "from flask import Flask",
@@ -3587,12 +2552,12 @@ def validate_backend_imports(project_name):
 
     for check in required_checks:
         if check in app_code:
-            issues.append(f"✅ Found: {check}")
+            issues.append(f"âœ… Found: {check}")
         else:
-            issues.append(f"❌ Missing: {check}")
+            issues.append(f"âŒ Missing: {check}")
 
-    if not any(issue.startswith("❌") for issue in issues):
-        issues.append("✅ Backend imports look valid.")
+    if not any(issue.startswith("âŒ") for issue in issues):
+        issues.append("âœ… Backend imports look valid.")
 
     log_project_activity(
         project_name,
@@ -3601,7 +2566,7 @@ def validate_backend_imports(project_name):
     )
 
     return f"""
-📦 BACKEND IMPORT VALIDATION
+ðŸ“¦ BACKEND IMPORT VALIDATION
 
 PROJECT:
 {project_name}
@@ -3644,7 +2609,7 @@ if __name__ == "__main__":
     )
 
     return f"""
-🛠️ BACKEND IMPORT FIX COMPLETE
+ðŸ› ï¸ BACKEND IMPORT FIX COMPLETE
 
 PROJECT:
 {project_name}
@@ -3779,10 +2744,10 @@ def quality_fix_project(project_name):
     print("ENTER STEP 5.5")
     print("ENTER STEP 6")
 
-    if "❌" in endpoint_result:
-        final_status = "❌ NEEDS ATTENTION"
+    if "âŒ" in endpoint_result:
+        final_status = "âŒ NEEDS ATTENTION"
     else:
-        final_status = "✅ READY"
+        final_status = "âœ… READY"
 
     log_project_activity(
         project_name,
@@ -3791,7 +2756,7 @@ def quality_fix_project(project_name):
     )
 
     return f"""
-🧪 QUALITY FIX REPORT
+ðŸ§ª QUALITY FIX REPORT
 
 PROJECT:
 {project_name}
@@ -3834,10 +2799,10 @@ def quality_check_project(project_name):
 
     combined = "\n".join(results)
 
-    if "❌" in combined:
-        final_status = "❌ NEEDS FIX"
+    if "âŒ" in combined:
+        final_status = "âŒ NEEDS FIX"
     else:
-        final_status = "✅ READY"
+        final_status = "âœ… READY"
 
     log_project_activity(
         project_name,
@@ -3846,7 +2811,7 @@ def quality_check_project(project_name):
     )
 
     return f"""
-🧪 QUALITY CHECK REPORT
+ðŸ§ª QUALITY CHECK REPORT
 
 PROJECT:
 {project_name}
@@ -3945,7 +2910,7 @@ def clean_frontend_dependencies(project_name):
     )
 
     return f"""
-🧹 FRONTEND DEPENDENCY CLEAN COMPLETE
+ðŸ§¹ FRONTEND DEPENDENCY CLEAN COMPLETE
 
 PROJECT:
 {project_name}
@@ -4042,10 +3007,10 @@ Rules:
 
     snapshot_result = create_project_snapshot(project_name)
 
-    if "❌" in quality_check_result:
-        final_status = "❌ NEEDS ATTENTION"
+    if "âŒ" in quality_check_result:
+        final_status = "âŒ NEEDS ATTENTION"
     else:
-        final_status = "✅ READY"
+        final_status = "âœ… READY"
 
     log_project_activity(
         project_name,
@@ -4054,7 +3019,7 @@ Rules:
     )
 
     return f"""
-🛠️ APP MODIFICATION COMPLETE
+ðŸ› ï¸ APP MODIFICATION COMPLETE
 
 PROJECT:
 workspace/{project_name}
@@ -4131,9 +3096,9 @@ def validate_sqlite_runtime(project_name):
 
         if hasattr(database_module, "init_db"):
             database_module.init_db()
-            results.append("✅ init_db() executed successfully")
+            results.append("âœ… init_db() executed successfully")
         else:
-            results.append("❌ init_db() not found in database.py")
+            results.append("âŒ init_db() not found in database.py")
 
         os.chdir(old_cwd)
 
@@ -4143,13 +3108,13 @@ def validate_sqlite_runtime(project_name):
         except Exception:
             pass
 
-        results.append(f"❌ init_db() failed: {e}")
+        results.append(f"âŒ init_db() failed: {e}")
 
     # Step 2: Check actual SQLite DB file
     if not os.path.exists(db_file):
-        results.append("❌ app.db was not created")
+        results.append("âŒ app.db was not created")
     else:
-        results.append("✅ app.db exists")
+        results.append("âœ… app.db exists")
 
         try:
             connection = sqlite3.connect(db_file)
@@ -4162,7 +3127,7 @@ def validate_sqlite_runtime(project_name):
             table = cursor.fetchone()
 
             if table:
-                results.append("✅ items table exists in app.db")
+                results.append("âœ… items table exists in app.db")
 
                 cursor.execute("PRAGMA table_info(items)")
                 columns = [row[1] for row in cursor.fetchall()]
@@ -4177,17 +3142,17 @@ def validate_sqlite_runtime(project_name):
 
                 for column in required_columns:
                     if column in columns:
-                        results.append(f"✅ SQLite column exists: {column}")
+                        results.append(f"âœ… SQLite column exists: {column}")
                     else:
-                        results.append(f"❌ SQLite column missing: {column}")
+                        results.append(f"âŒ SQLite column missing: {column}")
 
             else:
-                results.append("❌ items table missing in app.db")
+                results.append("âŒ items table missing in app.db")
 
             connection.close()
 
         except Exception as e:
-            results.append(f"❌ SQLite inspection failed: {e}")
+            results.append(f"âŒ SQLite inspection failed: {e}")
 
     log_project_activity(
         project_name,
@@ -4196,7 +3161,7 @@ def validate_sqlite_runtime(project_name):
     )
 
     return f"""
-🗄 SQLITE RUNTIME VALIDATION
+ðŸ—„ SQLITE RUNTIME VALIDATION
 
 PROJECT:
 {project_name}
@@ -4223,7 +3188,7 @@ def fix_sqlite_runtime(project_name):
     )
 
     return f"""
-🛠️ SQLITE RUNTIME FIX COMPLETE
+ðŸ› ï¸ SQLITE RUNTIME FIX COMPLETE
 
 PROJECT:
 {project_name}
@@ -4327,7 +3292,7 @@ Rules:
 
     if not files_dict:
         return f"""
-❌ FEATURE ADD FAILED
+âŒ FEATURE ADD FAILED
 
 No files were returned by the model.
 
@@ -4345,10 +3310,10 @@ Snapshot before attempt:
 
     after_snapshot = create_project_snapshot(project_name)
 
-    if "❌" in quality_check_result:
-        final_status = "❌ NEEDS ATTENTION"
+    if "âŒ" in quality_check_result:
+        final_status = "âŒ NEEDS ATTENTION"
     else:
-        final_status = "✅ READY"
+        final_status = "âœ… READY"
 
     log_project_activity(
         project_name,
@@ -4357,7 +3322,7 @@ Snapshot before attempt:
     )
 
     return f"""
-✨ FEATURE ADD COMPLETE
+âœ¨ FEATURE ADD COMPLETE
 
 PROJECT:
 workspace/{project_name}
@@ -4527,7 +3492,7 @@ export default function App() {
     )
 
     return f"""
-✅ SEARCH FEATURE ADDED
+âœ… SEARCH FEATURE ADDED
 
 PROJECT:
 {project_name}
@@ -4583,7 +3548,7 @@ def run_agent(user_input):
         )
 
         return f"""
-✅ FULL-STACK PROJECT CREATED SUCCESSFULLY
+âœ… FULL-STACK PROJECT CREATED SUCCESSFULLY
 
 PROJECT:
 workspace/{project_name}
@@ -4617,7 +3582,7 @@ STRUCTURE FIXES:
         )
 
         return f"""
-✅ PROJECT CREATED SUCCESSFULLY
+âœ… PROJECT CREATED SUCCESSFULLY
 
 PROJECT:
 workspace/{project_name}
