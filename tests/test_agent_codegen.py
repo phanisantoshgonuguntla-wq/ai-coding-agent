@@ -307,6 +307,77 @@ def helper():
     assert "workspace/demo_app/backend/utils.py" in output
 
 
+def test_project_preview_warns_for_missing_python_dependency(monkeypatch, tmp_path):
+    project_path = tmp_path / "demo_app"
+    requirements = project_path / "backend" / "requirements.txt"
+    requirements.parent.mkdir(parents=True)
+    requirements.write_text("flask\n", encoding="utf-8")
+
+    def fake_generate_project_code_files(prompt, project_context):
+        return """file: backend/reports.py
+import pandas as pd
+
+def build_report():
+    return pd.DataFrame()
+"""
+
+    monkeypatch.setattr(
+        agent_codegen,
+        "generate_project_code_files",
+        fake_generate_project_code_files,
+    )
+
+    preview = agent_codegen.build_project_code_files_preview(
+        "demo_app",
+        "add report helper",
+        workspace_dir=str(tmp_path),
+    )
+
+    assert preview["ok"] is True
+    assert preview["dependency_warnings"] == [
+        "demo_app/backend/reports.py: Python import 'pandas' is not declared in backend/requirements.txt"
+    ]
+    assert "DEPENDENCY WARNINGS:" in preview["output"]
+    assert "pandas" in preview["output"]
+
+
+def test_project_preview_warns_for_missing_js_dependency(monkeypatch, tmp_path):
+    project_path = tmp_path / "demo_app"
+    package_json = project_path / "frontend" / "package.json"
+    package_json.parent.mkdir(parents=True)
+    package_json.write_text(
+        json.dumps({"dependencies": {"react": "latest"}}),
+        encoding="utf-8",
+    )
+
+    def fake_generate_project_code_files(prompt, project_context):
+        return """file: frontend/src/App.jsx
+import axios from "axios";
+
+export default function App() {
+    return null;
+}
+"""
+
+    monkeypatch.setattr(
+        agent_codegen,
+        "generate_project_code_files",
+        fake_generate_project_code_files,
+    )
+
+    preview = agent_codegen.build_project_code_files_preview(
+        "demo_app",
+        "add axios call",
+        workspace_dir=str(tmp_path),
+    )
+
+    assert preview["ok"] is True
+    assert preview["dependency_warnings"] == [
+        "demo_app/frontend/src/App.jsx: JS package 'axios' is not declared in frontend/package.json"
+    ]
+    assert "axios" in preview["output"]
+
+
 def test_build_project_repair_files_preview_uses_validation_output(monkeypatch, tmp_path):
     project_path = tmp_path / "demo_app"
     app_file = project_path / "backend" / "app.py"
@@ -365,6 +436,7 @@ def test_record_and_show_codegen_session(tmp_path):
         "add export",
         [{"display_path": "demo_app/frontend/src/App.jsx"}],
         "APP VALIDATION REPORT\nFINAL STATUS:\nREADY",
+        ["demo_app/frontend/src/App.jsx: JS package 'axios' is not declared in frontend/package.json"],
         workspace_dir=str(tmp_path),
     )
 
@@ -378,6 +450,7 @@ def test_record_and_show_codegen_session(tmp_path):
     assert "demo_app/frontend/src/App.jsx" in output
     assert "passed" in output
     assert "add export" in output
+    assert "axios" in output
 
 
 def test_list_codegen_sessions_orders_recent_first(tmp_path, monkeypatch):

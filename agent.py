@@ -1788,13 +1788,21 @@ def explain_project_context(project_name, prompt):
     return agent_codegen.explain_project_context(project_name, prompt, WORKSPACE_DIR)
 
 
-def record_codegen_session(session_type, project_name, prompt, files, validation_output=""):
+def record_codegen_session(
+    session_type,
+    project_name,
+    prompt,
+    files,
+    validation_output="",
+    dependency_warnings=None,
+):
     return agent_codegen.record_codegen_session(
         session_type,
         project_name,
         prompt,
         files,
         validation_output,
+        dependency_warnings,
         WORKSPACE_DIR,
     )
 

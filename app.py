@@ -286,6 +286,7 @@ elif mode == "Generate code":
                         code_prompt.strip(),
                         repair_preview["files"],
                         validation_output,
+                        repair_preview.get("dependency_warnings", []),
                     )
                     direct_output += (
                         "\n\nCODEGEN SESSION:\n"
@@ -324,6 +325,7 @@ elif mode == "Generate code":
                         "project_name": project_name,
                         "files": preview["files"],
                         "has_existing_files": preview["has_existing_files"],
+                        "dependency_warnings": preview.get("dependency_warnings", []),
                         "output": preview["output"],
                     }
                 else:
@@ -385,6 +387,7 @@ elif mode == "Generate code":
                                         "project_name": project_name,
                                         "files": repair_preview["files"],
                                         "has_existing_files": repair_preview["has_existing_files"],
+                                        "dependency_warnings": repair_preview.get("dependency_warnings", []),
                                         "output": repair_preview["output"],
                                     }
                                 else:
@@ -408,6 +411,7 @@ elif mode == "Generate code":
                             code_prompt.strip(),
                             preview["files"],
                             validation_output,
+                            preview.get("dependency_warnings", []),
                         )
                         direct_output += (
                             "\n\nCODEGEN SESSION:\n"

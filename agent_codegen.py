@@ -10,6 +10,35 @@ from agent_text import clean_code_output
 
 
 CODEGEN_SESSIONS_DIR = os.path.join("_runtime", "codegen_sessions")
+PYTHON_STDLIB_MODULES = {
+    "collections",
+    "csv",
+    "datetime",
+    "functools",
+    "json",
+    "math",
+    "os",
+    "pathlib",
+    "random",
+    "re",
+    "sqlite3",
+    "sys",
+    "time",
+    "typing",
+    "urllib",
+    "uuid",
+}
+PYTHON_LOCAL_MODULES = {
+    "app",
+    "database",
+    "models",
+    "routes",
+}
+JS_LOCAL_PREFIXES = (".", "/")
+JS_BUILTIN_PACKAGES = {
+    "react",
+    "react-dom",
+}
 
 
 def generate_code(prompt):
@@ -227,6 +256,147 @@ def _read_context_file(project_path, relative_path, max_chars=4000):
 --- {relative_path} ---
 {content}
 """
+
+
+def _read_project_text(project_path, relative_path):
+    file_path = os.path.join(project_path, relative_path)
+
+    if not os.path.exists(file_path):
+        return ""
+
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            return f.read()
+    except Exception:
+        return ""
+
+
+def _normalize_dependency_name(name):
+    return name.strip().lower().replace("_", "-")
+
+
+def read_declared_python_dependencies(project_path):
+    content = _read_project_text(project_path, "backend/requirements.txt")
+    dependencies = set()
+
+    for line in content.splitlines():
+        line = line.strip()
+
+        if not line or line.startswith("#"):
+            continue
+
+        package = re.split(r"[<>=~!]", line, maxsplit=1)[0].strip()
+
+        if package:
+            dependencies.add(_normalize_dependency_name(package))
+
+    return dependencies
+
+
+def read_declared_js_dependencies(project_path):
+    content = _read_project_text(project_path, "frontend/package.json")
+
+    if not content:
+        return set()
+
+    try:
+        package_json = json.loads(content)
+    except Exception:
+        return set()
+
+    dependencies = set()
+
+    for section in ["dependencies", "devDependencies"]:
+        values = package_json.get(section, {})
+
+        if isinstance(values, dict):
+            dependencies.update(values.keys())
+
+    return dependencies
+
+
+def extract_python_imports(code):
+    imports = set()
+
+    for line in code.splitlines():
+        stripped = line.strip()
+        import_match = re.match(r"import\s+([A-Za-z_][A-Za-z0-9_\.]*)", stripped)
+        from_match = re.match(r"from\s+([A-Za-z_][A-Za-z0-9_\.]*)\s+import\s+", stripped)
+
+        module = None
+
+        if import_match:
+            module = import_match.group(1)
+        elif from_match:
+            module = from_match.group(1)
+
+        if not module:
+            continue
+
+        imports.add(module.split(".")[0])
+
+    return imports
+
+
+def extract_js_imports(code):
+    imports = set()
+    patterns = [
+        r"import\s+.*?\s+from\s+['\"]([^'\"]+)['\"]",
+        r"import\s+['\"]([^'\"]+)['\"]",
+        r"require\(\s*['\"]([^'\"]+)['\"]\s*\)",
+    ]
+
+    for pattern in patterns:
+        for match in re.finditer(pattern, code):
+            package = match.group(1)
+
+            if package.startswith(JS_LOCAL_PREFIXES):
+                continue
+
+            if package.startswith("@"):
+                parts = package.split("/")
+                package = "/".join(parts[:2])
+            else:
+                package = package.split("/")[0]
+
+            imports.add(package)
+
+    return imports
+
+
+def detect_dependency_warnings(project_path, entries):
+    declared_python = read_declared_python_dependencies(project_path)
+    declared_js = read_declared_js_dependencies(project_path)
+    warnings = []
+
+    for entry in entries:
+        path = entry.get("project_relative_path") or entry.get("relative_path", "")
+        display_path = entry.get("display_path", path).replace("\\", "/")
+        code = entry.get("code", "")
+
+        if path.endswith(".py"):
+            for module in sorted(extract_python_imports(code)):
+                normalized = _normalize_dependency_name(module)
+
+                if module in PYTHON_STDLIB_MODULES or module in PYTHON_LOCAL_MODULES:
+                    continue
+
+                if normalized not in declared_python:
+                    warnings.append(
+                        f"{display_path}: Python import '{module}' is not declared in backend/requirements.txt"
+                    )
+
+        if path.endswith((".js", ".jsx", ".ts", ".tsx")):
+            for package in sorted(extract_js_imports(code)):
+                if package in JS_BUILTIN_PACKAGES:
+                    continue
+
+                if package not in declared_js:
+                    warnings.append(
+                        f"{display_path}: JS package '{package}' is not declared in frontend/package.json"
+                    )
+
+    return warnings
 
 
 PROJECT_CONTEXT_FILE_CATEGORIES = {
@@ -548,7 +718,26 @@ def _format_multi_file_preview(entries):
     ])
 
 
-def _format_project_multi_file_preview(entries, context_files):
+def _format_dependency_warning_section(dependency_warnings):
+    if not dependency_warnings:
+        return [
+            "DEPENDENCY WARNINGS:",
+            "None",
+            "",
+            "====================",
+            "",
+        ]
+
+    return [
+        "DEPENDENCY WARNINGS:",
+        *dependency_warnings,
+        "",
+        "====================",
+        "",
+    ]
+
+
+def _format_project_multi_file_preview(entries, context_files, dependency_warnings=None):
     context_section = [
         "PROJECT CONTEXT FILES:",
         *(context_files or ["None"]),
@@ -556,7 +745,12 @@ def _format_project_multi_file_preview(entries, context_files):
         "====================",
         "",
     ]
-    return "\n".join(context_section) + _format_multi_file_preview(entries)
+    dependency_section = _format_dependency_warning_section(dependency_warnings or [])
+    return (
+        "\n".join(context_section)
+        + "\n".join(dependency_section)
+        + _format_multi_file_preview(entries)
+    )
 
 
 def _build_code_files_preview_from_files(files, workspace_dir):
@@ -699,15 +893,22 @@ def build_project_code_files_preview(project_name, prompt, workspace_dir="worksp
         )
         file["display_path"] = file["relative_path"].replace("\\", "/")
 
+    dependency_warnings = detect_dependency_warnings(
+        project_workspace,
+        preview["files"],
+    )
+
     return {
         "ok": True,
         "project_name": context["project_name"],
         "context_files": context["context_files"],
+        "dependency_warnings": dependency_warnings,
         "files": preview["files"],
         "has_existing_files": preview["has_existing_files"],
         "output": _format_project_multi_file_preview(
             preview["files"],
             context["context_files"],
+            dependency_warnings,
         ),
     }
 
@@ -764,15 +965,22 @@ def _build_project_preview_from_generated_output(project_name, prompt, generated
         )
         file["display_path"] = file["relative_path"].replace("\\", "/")
 
+    dependency_warnings = detect_dependency_warnings(
+        project_workspace,
+        preview["files"],
+    )
+
     return {
         "ok": True,
         "project_name": context["project_name"],
         "context_files": context["context_files"],
+        "dependency_warnings": dependency_warnings,
         "files": preview["files"],
         "has_existing_files": preview["has_existing_files"],
         "output": _format_project_multi_file_preview(
             preview["files"],
             context["context_files"],
+            dependency_warnings,
         ),
     }
 
@@ -927,6 +1135,7 @@ def record_codegen_session(
     prompt,
     files,
     validation_output="",
+    dependency_warnings=None,
     workspace_dir="workspace",
 ):
     sessions_dir = _get_codegen_sessions_dir(workspace_dir)
@@ -950,6 +1159,7 @@ def record_codegen_session(
         "project_name": project_name,
         "prompt": prompt,
         "files": file_paths,
+        "dependency_warnings": dependency_warnings or [],
         "validation_status": _validation_status(validation_output),
         "validation_output": validation_output,
         "created_at": timestamp,
@@ -1039,6 +1249,9 @@ CREATED:
 
 VALIDATION:
 {session.get("validation_status")}
+
+DEPENDENCY WARNINGS:
+{chr(10).join(session.get("dependency_warnings", [])) or "None"}
 
 FILES:
 {chr(10).join(session.get("files", [])) or "None"}

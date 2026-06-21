@@ -71,7 +71,7 @@ stop fullstack <project_name>
 stop all apps
 ```
 
-For generated code files, preview first and then save so the written file matches the reviewed output. If a target file already exists, the preview includes a diff before overwrite. Multi-file generation previews every target file before saving them together. Project-aware code generation reads the selected project's spec and prompt-relevant files, then previews changes under `workspace/<project_name>/`. Use `explain project context` to see which files will be included. In the UI, project-aware saves can optionally run validation immediately after saving and generate a repair preview when validation fails. Project-aware saves and repair saves record local codegen sessions under `workspace/_runtime/codegen_sessions/`.
+For generated code files, preview first and then save so the written file matches the reviewed output. If a target file already exists, the preview includes a diff before overwrite. Multi-file generation previews every target file before saving them together. Project-aware code generation reads the selected project's spec and prompt-relevant files, then previews changes under `workspace/<project_name>/`. Use `explain project context` to see which files will be included. Project-aware previews warn when generated Python or JavaScript imports are not declared in `backend/requirements.txt` or `frontend/package.json`. In the UI, project-aware saves can optionally run validation immediately after saving and generate a repair preview when validation fails. Project-aware saves and repair saves record local codegen sessions under `workspace/_runtime/codegen_sessions/`.
 
 ## GitHub Notes
 
