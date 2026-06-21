@@ -136,6 +136,12 @@ AI Coding Agent commands:
 - explain project context <project_name> <prompt>
   Show which project files would be included as context for a prompt.
 
+- list codegen sessions
+  Show recent project-aware code generation sessions.
+
+- show codegen session <session_id>
+  Show details for a saved code generation session.
+
 - quality check <project_name>
   Inspect generated project quality.
 
@@ -1780,6 +1786,25 @@ def preview_project_repair_files(project_name, prompt, validation_output):
 
 def explain_project_context(project_name, prompt):
     return agent_codegen.explain_project_context(project_name, prompt, WORKSPACE_DIR)
+
+
+def record_codegen_session(session_type, project_name, prompt, files, validation_output=""):
+    return agent_codegen.record_codegen_session(
+        session_type,
+        project_name,
+        prompt,
+        files,
+        validation_output,
+        WORKSPACE_DIR,
+    )
+
+
+def list_codegen_sessions():
+    return agent_codegen.list_codegen_sessions(WORKSPACE_DIR)
+
+
+def show_codegen_session(session_id):
+    return agent_codegen.show_codegen_session(session_id, WORKSPACE_DIR)
 
 
 def run_agent(user_input):

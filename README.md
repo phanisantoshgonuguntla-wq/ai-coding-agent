@@ -61,6 +61,8 @@ save code files create snippets/math.py and snippets/text.py helper modules
 preview project code <project_name> add a CSV export helper and button
 save project code <project_name> add a CSV export helper and button
 explain project context <project_name> add a CSV export helper and button
+list codegen sessions
+show codegen session <session_id>
 run fullstack <project_name>
 validate app <project_name>
 refresh project ports <project_name>
@@ -69,7 +71,7 @@ stop fullstack <project_name>
 stop all apps
 ```
 
-For generated code files, preview first and then save so the written file matches the reviewed output. If a target file already exists, the preview includes a diff before overwrite. Multi-file generation previews every target file before saving them together. Project-aware code generation reads the selected project's spec and prompt-relevant files, then previews changes under `workspace/<project_name>/`. Use `explain project context` to see which files will be included. In the UI, project-aware saves can optionally run validation immediately after saving and generate a repair preview when validation fails.
+For generated code files, preview first and then save so the written file matches the reviewed output. If a target file already exists, the preview includes a diff before overwrite. Multi-file generation previews every target file before saving them together. Project-aware code generation reads the selected project's spec and prompt-relevant files, then previews changes under `workspace/<project_name>/`. Use `explain project context` to see which files will be included. In the UI, project-aware saves can optionally run validation immediately after saving and generate a repair preview when validation fails. Project-aware saves and repair saves record local codegen sessions under `workspace/_runtime/codegen_sessions/`.
 
 ## GitHub Notes
 

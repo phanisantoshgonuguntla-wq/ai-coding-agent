@@ -257,6 +257,7 @@ elif mode == "Generate code":
                     direct_output = agent.save_code_files_content(
                         repair_preview["files"],
                     )
+                    validation_output = ""
 
                     if validate_after_save:
                         with st.spinner("Validating repaired project..."):
@@ -278,6 +279,18 @@ elif mode == "Generate code":
                             "\n\nNEXT CHECK:\n"
                             f"validate app {project_name}"
                         )
+
+                    session = agent.record_codegen_session(
+                        "repair",
+                        project_name,
+                        code_prompt.strip(),
+                        repair_preview["files"],
+                        validation_output,
+                    )
+                    direct_output += (
+                        "\n\nCODEGEN SESSION:\n"
+                        f"{session['id']}"
+                    )
 
         if project_aware and st.button("Explain context"):
             if not code_prompt.strip():
@@ -336,6 +349,8 @@ elif mode == "Generate code":
                     direct_output = agent.save_code_files_content(
                         preview["files"],
                     )
+                    validation_output = ""
+
                     if project_aware:
                         if validate_after_save:
                             with st.spinner("Validating saved project..."):
@@ -386,6 +401,18 @@ elif mode == "Generate code":
                                 "\n\nNEXT CHECK:\n"
                                 f"validate app {project_name}"
                             )
+
+                        session = agent.record_codegen_session(
+                            "project_save",
+                            project_name,
+                            code_prompt.strip(),
+                            preview["files"],
+                            validation_output,
+                        )
+                        direct_output += (
+                            "\n\nCODEGEN SESSION:\n"
+                            f"{session['id']}"
+                        )
     elif save_to_file:
         saved_preview = st.session_state.get("generated_code_preview")
         preview_matches_input = (

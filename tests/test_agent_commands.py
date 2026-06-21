@@ -18,6 +18,8 @@ def make_context():
         "preview_project_code_files": lambda project, prompt: f"preview-project:{project}:{prompt}",
         "save_generated_project_code_files": lambda project, prompt: f"save-project:{project}:{prompt}",
         "explain_project_context": lambda project, prompt: f"context:{project}:{prompt}",
+        "list_codegen_sessions": lambda: "sessions",
+        "show_codegen_session": lambda session_id: f"session:{session_id}",
         "create_app_workflow": lambda text: f"create:{text}",
     }
 
@@ -99,6 +101,17 @@ def test_explain_project_context_routes_project_and_prompt_to_handler():
     ) == "context:demo_app:add export button"
 
 
+def test_list_codegen_sessions_routes_to_handler():
+    assert agent_commands.run_agent("list codegen sessions", make_context()) == "sessions"
+
+
+def test_show_codegen_session_routes_session_id_to_handler():
+    assert agent_commands.run_agent(
+        "show codegen session codegen_123",
+        make_context(),
+    ) == "session:codegen_123"
+
+
 def test_generate_code_file_validates_required_arguments():
     assert agent_commands.run_agent("generate code file", make_context()) == (
         "Use format: generate code file <workspace_path> <prompt>"
@@ -138,6 +151,12 @@ def test_preview_and_save_project_code_validate_required_arguments():
 def test_explain_project_context_validates_required_arguments():
     assert agent_commands.run_agent("explain project context", make_context()) == (
         "Use format: explain project context <project_name> <prompt>"
+    )
+
+
+def test_show_codegen_session_validates_required_arguments():
+    assert agent_commands.run_agent("show codegen session", make_context()) == (
+        "Use format: show codegen session <session_id>"
     )
 
 

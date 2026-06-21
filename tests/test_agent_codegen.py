@@ -358,6 +358,53 @@ def test_build_project_repair_files_preview_requires_validation_output(tmp_path)
     assert preview["output"] == "Please provide validation output to repair."
 
 
+def test_record_and_show_codegen_session(tmp_path):
+    session = agent_codegen.record_codegen_session(
+        "project_save",
+        "demo_app",
+        "add export",
+        [{"display_path": "demo_app/frontend/src/App.jsx"}],
+        "APP VALIDATION REPORT\nFINAL STATUS:\nREADY",
+        workspace_dir=str(tmp_path),
+    )
+
+    output = agent_codegen.show_codegen_session(
+        session["id"],
+        workspace_dir=str(tmp_path),
+    )
+
+    assert session["id"] in output
+    assert "project_save" in output
+    assert "demo_app/frontend/src/App.jsx" in output
+    assert "passed" in output
+    assert "add export" in output
+
+
+def test_list_codegen_sessions_orders_recent_first(tmp_path, monkeypatch):
+    first = agent_codegen.record_codegen_session(
+        "project_save",
+        "first_app",
+        "first prompt",
+        [{"display_path": "first_app/a.py"}],
+        workspace_dir=str(tmp_path),
+    )
+    second = agent_codegen.record_codegen_session(
+        "repair",
+        "second_app",
+        "second prompt",
+        [{"display_path": "second_app/b.py"}],
+        "FAIL: broken",
+        workspace_dir=str(tmp_path),
+    )
+
+    output = agent_codegen.list_codegen_sessions(workspace_dir=str(tmp_path))
+
+    assert "CODEGEN SESSIONS" in output
+    assert first["id"] in output
+    assert second["id"] in output
+    assert "failed" in output
+
+
 def test_save_generated_code_writes_under_workspace(monkeypatch, tmp_path):
     def fake_generate_code(prompt):
         return "def add_numbers(a, b):\n    return a + b"

@@ -210,6 +210,15 @@ def _explain_project_context(user_input, ctx):
     return ctx["explain_project_context"](parts[0], parts[1])
 
 
+def _show_codegen_session(user_input, ctx):
+    session_id = strip_command_prefix(user_input, "show codegen session")
+
+    if not session_id:
+        return "Use format: show codegen session <session_id>"
+
+    return ctx["show_codegen_session"](session_id)
+
+
 def build_command_registry(ctx):
     return [
         Command(
@@ -226,6 +235,16 @@ def build_command_registry(ctx):
             "create_app",
             lambda text, lower: lower.startswith("create app "),
             lambda text: ctx["create_app_workflow"](text),
+        ),
+        Command(
+            "list_codegen_sessions",
+            lambda text, lower: lower == "list codegen sessions",
+            lambda text: ctx["list_codegen_sessions"](),
+        ),
+        Command(
+            "show_codegen_session",
+            lambda text, lower: lower == "show codegen session" or lower.startswith("show codegen session "),
+            lambda text: _show_codegen_session(text, ctx),
         ),
         Command(
             "explain_project_context",

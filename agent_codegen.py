@@ -2,9 +2,14 @@ import difflib
 import json
 import os
 import re
+import uuid
+from datetime import datetime
 
 from agent_llm import invoke_llm
 from agent_text import clean_code_output
+
+
+CODEGEN_SESSIONS_DIR = os.path.join("_runtime", "codegen_sessions")
 
 
 def generate_code(prompt):
@@ -899,6 +904,150 @@ def save_code_files_content(files, workspace_dir="workspace"):
 
 FILES:
 {chr(10).join(saved_paths)}
+"""
+
+
+def _get_codegen_sessions_dir(workspace_dir):
+    return os.path.join(workspace_dir, CODEGEN_SESSIONS_DIR)
+
+
+def _validation_status(validation_output):
+    if not validation_output:
+        return "not_run"
+
+    if any(marker in validation_output for marker in ["FAIL:", "NEEDS ATTENTION", "NEEDS FIX"]):
+        return "failed"
+
+    return "passed"
+
+
+def record_codegen_session(
+    session_type,
+    project_name,
+    prompt,
+    files,
+    validation_output="",
+    workspace_dir="workspace",
+):
+    sessions_dir = _get_codegen_sessions_dir(workspace_dir)
+    os.makedirs(sessions_dir, exist_ok=True)
+
+    timestamp = datetime.now().isoformat(timespec="seconds")
+    session_id = (
+        "codegen_"
+        + datetime.now().strftime("%Y%m%d_%H%M%S")
+        + "_"
+        + uuid.uuid4().hex[:8]
+    )
+    file_paths = [
+        file.get("display_path")
+        or file.get("relative_path", "").replace("\\", "/")
+        for file in files
+    ]
+    session = {
+        "id": session_id,
+        "type": session_type,
+        "project_name": project_name,
+        "prompt": prompt,
+        "files": file_paths,
+        "validation_status": _validation_status(validation_output),
+        "validation_output": validation_output,
+        "created_at": timestamp,
+    }
+    session_path = os.path.join(sessions_dir, f"{session_id}.json")
+
+    with open(session_path, "w", encoding="utf-8") as f:
+        json.dump(session, f, indent=2)
+
+    return session
+
+
+def _read_codegen_session_file(session_path):
+    try:
+        with open(session_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def list_codegen_sessions(workspace_dir="workspace", limit=20):
+    sessions_dir = _get_codegen_sessions_dir(workspace_dir)
+
+    if not os.path.exists(sessions_dir):
+        return "No codegen sessions found."
+
+    sessions = []
+
+    for file_name in os.listdir(sessions_dir):
+        if not file_name.endswith(".json"):
+            continue
+
+        session = _read_codegen_session_file(os.path.join(sessions_dir, file_name))
+
+        if session:
+            sessions.append(session)
+
+    if not sessions:
+        return "No codegen sessions found."
+
+    sessions.sort(key=lambda item: item.get("created_at", ""), reverse=True)
+    lines = [
+        "CODEGEN SESSIONS",
+        "",
+    ]
+
+    for session in sessions[:limit]:
+        lines.append(
+            f"{session.get('id')} | {session.get('project_name')} | "
+            f"{session.get('type')} | {session.get('validation_status')} | "
+            f"{session.get('created_at')}"
+        )
+
+    return "\n".join(lines)
+
+
+def show_codegen_session(session_id, workspace_dir="workspace"):
+    session_id = session_id.strip()
+
+    if not session_id:
+        return "Use format: show codegen session <session_id>"
+
+    sessions_dir = _get_codegen_sessions_dir(workspace_dir)
+    session_path = os.path.join(sessions_dir, f"{session_id}.json")
+
+    if not os.path.exists(session_path):
+        return f"Codegen session not found: {session_id}"
+
+    session = _read_codegen_session_file(session_path)
+
+    if not session:
+        return f"Could not read codegen session: {session_id}"
+
+    return f"""CODEGEN SESSION
+
+ID:
+{session.get("id")}
+
+TYPE:
+{session.get("type")}
+
+PROJECT:
+{session.get("project_name")}
+
+CREATED:
+{session.get("created_at")}
+
+VALIDATION:
+{session.get("validation_status")}
+
+FILES:
+{chr(10).join(session.get("files", [])) or "None"}
+
+PROMPT:
+{session.get("prompt", "")}
+
+VALIDATION OUTPUT:
+{session.get("validation_output", "") or "Not run"}
 """
 
 
