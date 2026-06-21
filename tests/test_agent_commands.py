@@ -15,6 +15,8 @@ def make_context():
         "save_generated_code": lambda path, prompt: f"save:{path}:{prompt}",
         "preview_generated_code_files": lambda prompt: f"preview-files:{prompt}",
         "save_generated_code_files": lambda prompt: f"save-files:{prompt}",
+        "preview_project_code_files": lambda project, prompt: f"preview-project:{project}:{prompt}",
+        "save_generated_project_code_files": lambda project, prompt: f"save-project:{project}:{prompt}",
         "create_app_workflow": lambda text: f"create:{text}",
     }
 
@@ -75,6 +77,20 @@ def test_save_code_files_routes_prompt_to_save_handler():
     ) == "save-files:create math.py and text.py helpers"
 
 
+def test_preview_project_code_routes_project_and_prompt_to_preview_handler():
+    assert agent_commands.run_agent(
+        "preview project code demo_app add export button",
+        make_context(),
+    ) == "preview-project:demo_app:add export button"
+
+
+def test_save_project_code_routes_project_and_prompt_to_save_handler():
+    assert agent_commands.run_agent(
+        "save project code demo_app add export button",
+        make_context(),
+    ) == "save-project:demo_app:add export button"
+
+
 def test_generate_code_file_validates_required_arguments():
     assert agent_commands.run_agent("generate code file", make_context()) == (
         "Use format: generate code file <workspace_path> <prompt>"
@@ -99,6 +115,15 @@ def test_preview_and_save_code_files_validate_required_arguments():
     )
     assert agent_commands.run_agent("save code files", make_context()) == (
         "Use format: save code files <prompt>"
+    )
+
+
+def test_preview_and_save_project_code_validate_required_arguments():
+    assert agent_commands.run_agent("preview project code", make_context()) == (
+        "Use format: preview project code <project_name> <prompt>"
+    )
+    assert agent_commands.run_agent("save project code", make_context()) == (
+        "Use format: save project code <project_name> <prompt>"
     )
 
 

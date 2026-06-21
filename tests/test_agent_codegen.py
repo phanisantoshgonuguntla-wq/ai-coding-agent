@@ -1,4 +1,5 @@
 import agent_codegen
+import json
 
 
 def test_generate_code_requires_prompt():
@@ -152,6 +153,117 @@ def test_save_code_files_content_writes_all_previewed_files(tmp_path):
     assert "CODE FILES SAVED" in output
     assert "workspace/snippets/math.py" in output
     assert "workspace/snippets/text.py" in output
+
+
+def test_build_project_code_files_preview_uses_project_context(monkeypatch, tmp_path):
+    project_path = tmp_path / "demo_app"
+    app_file = project_path / "frontend" / "src" / "App.jsx"
+    app_file.parent.mkdir(parents=True)
+    app_file.write_text("export default function App() { return null; }\n", encoding="utf-8")
+    (project_path / "project_spec.json").write_text(
+        json.dumps({
+            "stack_key": "react_flask_sqlite",
+            "app_type": "React + Flask + SQLite",
+            "features": ["List customers"],
+        }),
+        encoding="utf-8",
+    )
+    prompts = []
+
+    def fake_generate_project_code_files(prompt, project_context):
+        prompts.append((prompt, project_context))
+        return """file: frontend/src/App.jsx
+export default function App() {
+    return <h1>Customers</h1>;
+}
+"""
+
+    monkeypatch.setattr(
+        agent_codegen,
+        "generate_project_code_files",
+        fake_generate_project_code_files,
+    )
+
+    preview = agent_codegen.build_project_code_files_preview(
+        "demo_app",
+        "add a customers heading",
+        workspace_dir=str(tmp_path),
+    )
+
+    assert preview["ok"] is True
+    assert preview["project_name"] == "demo_app"
+    assert preview["has_existing_files"] is True
+    assert preview["files"][0]["relative_path"].replace("\\", "/") == "demo_app/frontend/src/App.jsx"
+    assert "- workspace/demo_app/frontend/src/App.jsx (overwrite)" in preview["output"]
+    assert "DIFF:" in preview["output"]
+    assert "add a customers heading" in prompts[0][0]
+    assert "React + Flask + SQLite" in prompts[0][1]
+    assert "frontend/src/App.jsx" in prompts[0][1]
+
+
+def test_build_project_code_files_preview_rejects_missing_project(tmp_path):
+    preview = agent_codegen.build_project_code_files_preview(
+        "missing_app",
+        "add a heading",
+        workspace_dir=str(tmp_path),
+    )
+
+    assert preview["ok"] is False
+    assert preview["output"] == "Project not found: missing_app"
+
+
+def test_build_project_code_files_preview_rejects_workspace_prefixed_paths(monkeypatch, tmp_path):
+    project_path = tmp_path / "demo_app"
+    project_path.mkdir()
+
+    def fake_generate_project_code_files(prompt, project_context):
+        return """file: workspace/demo_app/frontend/src/App.jsx
+bad path
+"""
+
+    monkeypatch.setattr(
+        agent_codegen,
+        "generate_project_code_files",
+        fake_generate_project_code_files,
+    )
+
+    preview = agent_codegen.build_project_code_files_preview(
+        "demo_app",
+        "add a heading",
+        workspace_dir=str(tmp_path),
+    )
+
+    assert preview["ok"] is False
+    assert preview["output"] == "Project-aware generated paths must be relative to the project root."
+
+
+def test_save_generated_project_code_files_writes_under_project(monkeypatch, tmp_path):
+    project_path = tmp_path / "demo_app"
+    project_path.mkdir()
+
+    def fake_generate_project_code_files(prompt, project_context):
+        return """file: backend/utils.py
+def helper():
+    return "ok"
+"""
+
+    monkeypatch.setattr(
+        agent_codegen,
+        "generate_project_code_files",
+        fake_generate_project_code_files,
+    )
+
+    output = agent_codegen.save_generated_project_code_files(
+        "demo_app",
+        "add backend helper",
+        workspace_dir=str(tmp_path),
+    )
+
+    saved_file = project_path / "backend" / "utils.py"
+
+    assert saved_file.read_text(encoding="utf-8") == 'def helper():\n    return "ok"\n'
+    assert "CODE FILES SAVED" in output
+    assert "workspace/demo_app/backend/utils.py" in output
 
 
 def test_save_generated_code_writes_under_workspace(monkeypatch, tmp_path):

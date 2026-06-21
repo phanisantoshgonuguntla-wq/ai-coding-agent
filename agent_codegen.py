@@ -1,4 +1,5 @@
 import difflib
+import json
 import os
 import re
 
@@ -68,6 +69,46 @@ Rules:
         return str(error)
 
 
+def generate_project_code_files(prompt, project_context):
+    prompt = prompt.strip()
+
+    if not prompt:
+        return "Please provide a project-aware code generation prompt."
+
+    generation_prompt = f"""
+You are a focused coding assistant modifying an existing generated project.
+
+Project context:
+{project_context}
+
+User request:
+{prompt}
+
+STRICT OUTPUT FORMAT:
+
+file: relative/path/inside/project.ext
+<complete file contents>
+
+file: another/relative/path/inside/project.ext
+<complete file contents>
+
+Rules:
+- Return only file sections
+- Every file MUST start with: file: <relative_path>
+- Paths must be relative to the selected project root
+- Do not prefix paths with workspace/ or the project name
+- Do not include markdown fences
+- Do not include explanations
+- Include complete replacement file contents
+- Preserve the project's stack, ports, API URLs, and existing conventions
+"""
+
+    try:
+        return clean_code_output(invoke_llm(generation_prompt))
+    except RuntimeError as error:
+        return str(error)
+
+
 def _normalize_workspace_path(file_path, workspace_dir):
     file_path = file_path.strip().replace("\\", "/")
 
@@ -100,6 +141,110 @@ def _normalize_workspace_path(file_path, workspace_dir):
 
 def _looks_like_generation_error(text):
     return text.lstrip().startswith("Ollama ")
+
+
+def _load_project_spec(project_path):
+    spec_path = os.path.join(project_path, "project_spec.json")
+
+    if not os.path.exists(spec_path):
+        return {}
+
+    try:
+        with open(spec_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _read_context_file(project_path, relative_path, max_chars=4000):
+    file_path = os.path.join(project_path, relative_path)
+
+    if not os.path.exists(file_path):
+        return ""
+
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            content = f.read(max_chars)
+    except Exception:
+        return ""
+
+    return f"""
+--- {relative_path} ---
+{content}
+"""
+
+
+def build_project_context(project_name, workspace_dir="workspace"):
+    project_name = project_name.strip()
+
+    if not project_name:
+        return {
+            "ok": False,
+            "error": "Please provide a project name.",
+            "output": "Please provide a project name.",
+        }
+
+    workspace_root = os.path.abspath(workspace_dir)
+    project_path = os.path.abspath(os.path.join(workspace_root, project_name))
+
+    if os.path.commonpath([workspace_root, project_path]) != workspace_root:
+        return {
+            "ok": False,
+            "error": "Project path must stay inside workspace/.",
+            "output": "Project path must stay inside workspace/.",
+        }
+
+    if not os.path.isdir(project_path):
+        return {
+            "ok": False,
+            "error": f"Project not found: {project_name}",
+            "output": f"Project not found: {project_name}",
+        }
+
+    spec = _load_project_spec(project_path)
+    stack_key = spec.get("stack_key", "unknown")
+    stack_label = spec.get("app_type", stack_key)
+    context_files = [
+        "project_spec.json",
+        "project_config.json",
+        "backend/app.py",
+        "backend/routes.py",
+        "backend/models.py",
+        "backend/database.py",
+        "backend/Program.cs",
+        "backend/index.php",
+        "backend/database.php",
+        "frontend/package.json",
+        "frontend/src/App.jsx",
+        "frontend/src/api.js",
+        "frontend/src/style.css",
+    ]
+    file_context = "".join(
+        _read_context_file(project_path, relative_path)
+        for relative_path in context_files
+    ).strip()
+    spec_summary = json.dumps(spec, indent=2) if spec else "{}"
+
+    return {
+        "ok": True,
+        "project_name": project_name,
+        "project_path": project_path,
+        "stack_key": stack_key,
+        "stack_label": stack_label,
+        "context": f"""
+PROJECT:
+{project_name}
+
+STACK:
+{stack_label}
+
+PROJECT SPEC:
+{spec_summary}
+
+RELEVANT FILES:
+{file_context or "No recognized context files found."}
+""".strip(),
+    }
 
 
 def parse_generated_code_files(text):
@@ -237,37 +382,7 @@ def _format_multi_file_preview(entries):
     ])
 
 
-def build_generated_code_files_preview(prompt, workspace_dir="workspace"):
-    prompt = prompt.strip()
-
-    if not prompt:
-        return {
-            "ok": False,
-            "error": "Please provide a multi-file code generation prompt.",
-            "output": "Please provide a multi-file code generation prompt.",
-        }
-
-    generated_output = generate_code_files(prompt)
-
-    if _looks_like_generation_error(generated_output):
-        return {
-            "ok": False,
-            "error": generated_output,
-            "output": generated_output,
-        }
-
-    files = parse_generated_code_files(generated_output)
-
-    if not files:
-        return {
-            "ok": False,
-            "error": "No file sections were generated.",
-            "output": (
-                "No file sections were generated. "
-                "Expected format: file: path/to/file.ext"
-            ),
-        }
-
+def _build_code_files_preview_from_files(files, workspace_dir):
     entries = []
     seen_paths = set()
 
@@ -310,12 +425,122 @@ def build_generated_code_files_preview(prompt, workspace_dir="workspace"):
     }
 
 
+def build_generated_code_files_preview(prompt, workspace_dir="workspace"):
+    prompt = prompt.strip()
+
+    if not prompt:
+        return {
+            "ok": False,
+            "error": "Please provide a multi-file code generation prompt.",
+            "output": "Please provide a multi-file code generation prompt.",
+        }
+
+    generated_output = generate_code_files(prompt)
+
+    if _looks_like_generation_error(generated_output):
+        return {
+            "ok": False,
+            "error": generated_output,
+            "output": generated_output,
+        }
+
+    files = parse_generated_code_files(generated_output)
+
+    if not files:
+        return {
+            "ok": False,
+            "error": "No file sections were generated.",
+            "output": (
+                "No file sections were generated. "
+                "Expected format: file: path/to/file.ext"
+            ),
+        }
+
+    return _build_code_files_preview_from_files(files, workspace_dir)
+
+
+def build_project_code_files_preview(project_name, prompt, workspace_dir="workspace"):
+    prompt = prompt.strip()
+
+    if not prompt:
+        return {
+            "ok": False,
+            "error": "Please provide a project-aware code generation prompt.",
+            "output": "Please provide a project-aware code generation prompt.",
+        }
+
+    context = build_project_context(project_name, workspace_dir)
+
+    if not context["ok"]:
+        return context
+
+    generated_output = generate_project_code_files(prompt, context["context"])
+
+    if _looks_like_generation_error(generated_output):
+        return {
+            "ok": False,
+            "error": generated_output,
+            "output": generated_output,
+        }
+
+    files = parse_generated_code_files(generated_output)
+
+    if not files:
+        return {
+            "ok": False,
+            "error": "No file sections were generated.",
+            "output": (
+                "No file sections were generated. "
+                "Expected format: file: path/to/file.ext"
+            ),
+        }
+
+    project_name_for_path = context["project_name"].replace("\\", "/")
+    project_prefix = f"{project_name_for_path}/".lower()
+
+    for file in files:
+        generated_path = file["path"].replace("\\", "/").lower()
+
+        if generated_path.startswith("workspace/") or generated_path.startswith(project_prefix):
+            return {
+                "ok": False,
+                "error": "Project-aware generated paths must be relative to the project root.",
+                "output": "Project-aware generated paths must be relative to the project root.",
+            }
+
+    project_workspace = os.path.join(workspace_dir, context["project_name"])
+    preview = _build_code_files_preview_from_files(files, project_workspace)
+
+    if not preview["ok"]:
+        return preview
+
+    for file in preview["files"]:
+        file["project_relative_path"] = file["relative_path"]
+        file["relative_path"] = os.path.join(
+            context["project_name"],
+            file["project_relative_path"],
+        )
+        file["display_path"] = file["relative_path"].replace("\\", "/")
+
+    return {
+        "ok": True,
+        "project_name": context["project_name"],
+        "files": preview["files"],
+        "has_existing_files": preview["has_existing_files"],
+        "output": _format_multi_file_preview(preview["files"]),
+    }
+
+
 def preview_generated_code(file_path, prompt, workspace_dir="workspace"):
     return build_generated_code_preview(file_path, prompt, workspace_dir)["output"]
 
 
 def preview_generated_code_files(prompt, workspace_dir="workspace"):
     return build_generated_code_files_preview(prompt, workspace_dir)["output"]
+
+
+def preview_project_code_files(project_name, prompt, workspace_dir="workspace"):
+    return build_project_code_files_preview(project_name, prompt, workspace_dir)["output"]
 
 
 def save_code_content(file_path, code, workspace_dir="workspace"):
@@ -392,6 +617,15 @@ def save_generated_code(file_path, prompt, workspace_dir="workspace"):
 
 def save_generated_code_files(prompt, workspace_dir="workspace"):
     preview = build_generated_code_files_preview(prompt, workspace_dir)
+
+    if not preview["ok"]:
+        return preview["output"]
+
+    return save_code_files_content(preview["files"], workspace_dir)
+
+
+def save_generated_project_code_files(project_name, prompt, workspace_dir="workspace"):
+    preview = build_project_code_files_preview(project_name, prompt, workspace_dir)
 
     if not preview["ok"]:
         return preview["output"]

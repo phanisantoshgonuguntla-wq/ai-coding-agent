@@ -183,6 +183,24 @@ def _save_code_files(user_input, ctx):
     return ctx["save_generated_code_files"](prompt)
 
 
+def _preview_project_code(user_input, ctx):
+    parts = strip_command_prefix(user_input, "preview project code").split(maxsplit=1)
+
+    if len(parts) < 2:
+        return "Use format: preview project code <project_name> <prompt>"
+
+    return ctx["preview_project_code_files"](parts[0], parts[1])
+
+
+def _save_project_code(user_input, ctx):
+    parts = strip_command_prefix(user_input, "save project code").split(maxsplit=1)
+
+    if len(parts) < 2:
+        return "Use format: save project code <project_name> <prompt>"
+
+    return ctx["save_generated_project_code_files"](parts[0], parts[1])
+
+
 def build_command_registry(ctx):
     return [
         Command(
@@ -199,6 +217,16 @@ def build_command_registry(ctx):
             "create_app",
             lambda text, lower: lower.startswith("create app "),
             lambda text: ctx["create_app_workflow"](text),
+        ),
+        Command(
+            "preview_project_code",
+            lambda text, lower: lower == "preview project code" or lower.startswith("preview project code "),
+            lambda text: _preview_project_code(text, ctx),
+        ),
+        Command(
+            "save_project_code",
+            lambda text, lower: lower == "save project code" or lower.startswith("save project code "),
+            lambda text: _save_project_code(text, ctx),
         ),
         Command(
             "preview_code_files",

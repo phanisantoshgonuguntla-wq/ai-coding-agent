@@ -190,10 +190,25 @@ elif mode == "Generate code":
         )
 
     if save_to_file and multiple_files:
-        saved_preview = st.session_state.get("generated_code_files_preview")
+        project_aware = False
+        project_name = ""
+
+        if projects:
+            project_aware = st.checkbox("Use existing project context")
+
+        if project_aware:
+            project_name = st.selectbox("Project", projects)
+
+        preview_state_key = (
+            "project_code_files_preview"
+            if project_aware
+            else "generated_code_files_preview"
+        )
+        saved_preview = st.session_state.get(preview_state_key)
         preview_matches_input = (
             saved_preview
             and saved_preview.get("prompt") == code_prompt.strip()
+            and saved_preview.get("project_name", "") == project_name
         )
         overwrite_confirmed = False
 
@@ -207,19 +222,26 @@ elif mode == "Generate code":
                 direct_output = "Use format: preview code files <prompt>"
             else:
                 with st.spinner("Generating file previews..."):
-                    preview = agent.build_generated_code_files_preview(
-                        code_prompt.strip(),
-                    )
+                    if project_aware:
+                        preview = agent.build_project_code_files_preview(
+                            project_name,
+                            code_prompt.strip(),
+                        )
+                    else:
+                        preview = agent.build_generated_code_files_preview(
+                            code_prompt.strip(),
+                        )
 
                 if preview["ok"]:
-                    st.session_state["generated_code_files_preview"] = {
+                    st.session_state[preview_state_key] = {
                         "prompt": code_prompt.strip(),
+                        "project_name": project_name,
                         "files": preview["files"],
                         "has_existing_files": preview["has_existing_files"],
                         "output": preview["output"],
                     }
                 else:
-                    st.session_state.pop("generated_code_files_preview", None)
+                    st.session_state.pop(preview_state_key, None)
 
                 direct_output = preview["output"]
 
@@ -227,11 +249,12 @@ elif mode == "Generate code":
             if not code_prompt.strip():
                 direct_output = "Use format: save code files <prompt>"
             else:
-                preview = st.session_state.get("generated_code_files_preview")
+                preview = st.session_state.get(preview_state_key)
 
                 if (
                     not preview
                     or preview.get("prompt") != code_prompt.strip()
+                    or preview.get("project_name", "") != project_name
                 ):
                     direct_output = "Please preview this exact prompt before saving."
                 elif preview.get("has_existing_files") and not overwrite_confirmed:
@@ -240,6 +263,11 @@ elif mode == "Generate code":
                     direct_output = agent.save_code_files_content(
                         preview["files"],
                     )
+                    if project_aware:
+                        direct_output += (
+                            "\n\nNEXT CHECK:\n"
+                            f"validate app {project_name}"
+                        )
     elif save_to_file:
         saved_preview = st.session_state.get("generated_code_preview")
         preview_matches_input = (
