@@ -365,13 +365,25 @@ def extract_js_imports(code):
 
 
 def detect_dependency_warnings(project_path, entries):
+    gaps = detect_dependency_gaps(project_path, entries)
+    return [
+        gap["message"]
+        for gap in gaps
+    ]
+
+
+def detect_dependency_gaps(project_path, entries):
     declared_python = read_declared_python_dependencies(project_path)
     declared_js = read_declared_js_dependencies(project_path)
-    warnings = []
+    gaps = []
 
     for entry in entries:
-        path = entry.get("project_relative_path") or entry.get("relative_path", "")
-        display_path = entry.get("display_path", path).replace("\\", "/")
+        path = (
+            entry.get("project_relative_path")
+            or entry.get("relative_path")
+            or entry.get("path", "")
+        )
+        display_path = (entry.get("display_path") or path).replace("\\", "/")
         code = entry.get("code", "")
 
         if path.endswith(".py"):
@@ -382,9 +394,16 @@ def detect_dependency_warnings(project_path, entries):
                     continue
 
                 if normalized not in declared_python:
-                    warnings.append(
-                        f"{display_path}: Python import '{module}' is not declared in backend/requirements.txt"
-                    )
+                    gaps.append({
+                        "kind": "python",
+                        "name": normalized,
+                        "source_file": display_path,
+                        "dependency_file": "backend/requirements.txt",
+                        "message": (
+                            f"{display_path}: Python import '{module}' is not declared "
+                            "in backend/requirements.txt"
+                        ),
+                    })
 
         if path.endswith((".js", ".jsx", ".ts", ".tsx")):
             for package in sorted(extract_js_imports(code)):
@@ -392,11 +411,118 @@ def detect_dependency_warnings(project_path, entries):
                     continue
 
                 if package not in declared_js:
-                    warnings.append(
-                        f"{display_path}: JS package '{package}' is not declared in frontend/package.json"
-                    )
+                    gaps.append({
+                        "kind": "js",
+                        "name": package,
+                        "source_file": display_path,
+                        "dependency_file": "frontend/package.json",
+                        "message": (
+                            f"{display_path}: JS package '{package}' is not declared "
+                            "in frontend/package.json"
+                        ),
+                    })
 
-    return warnings
+    return gaps
+
+
+def _preview_contains_path(entries, relative_path):
+    normalized_path = relative_path.replace("\\", "/").lower()
+
+    for entry in entries:
+        candidate = (
+            entry.get("project_relative_path")
+            or entry.get("relative_path")
+            or entry.get("path", "")
+        ).replace("\\", "/").lower()
+
+        if candidate == normalized_path:
+            return True
+
+    return False
+
+
+def _build_requirements_patch(project_path, missing_packages):
+    existing = _read_project_text(project_path, "backend/requirements.txt")
+    lines = existing.splitlines()
+    declared = read_declared_python_dependencies(project_path)
+
+    for package in sorted(missing_packages):
+        if _normalize_dependency_name(package) not in declared:
+            lines.append(package)
+            declared.add(_normalize_dependency_name(package))
+
+    return "\n".join(lines).strip()
+
+
+def _build_package_json_patch(project_path, missing_packages):
+    existing = _read_project_text(project_path, "frontend/package.json")
+
+    if existing:
+        try:
+            package_json = json.loads(existing)
+        except Exception:
+            return ""
+    else:
+        package_json = {
+            "name": "generated-app",
+            "private": True,
+            "version": "0.0.0",
+            "type": "module",
+            "scripts": {
+                "dev": "vite",
+                "build": "vite build",
+            },
+            "dependencies": {},
+            "devDependencies": {},
+        }
+
+    dependencies = package_json.setdefault("dependencies", {})
+
+    if not isinstance(dependencies, dict):
+        dependencies = {}
+        package_json["dependencies"] = dependencies
+
+    for package in sorted(missing_packages):
+        dependencies.setdefault(package, "latest")
+
+    return json.dumps(package_json, indent=2)
+
+
+def build_dependency_patch_entries(project_path, entries):
+    gaps = detect_dependency_gaps(project_path, entries)
+    python_packages = {
+        gap["name"]
+        for gap in gaps
+        if gap["kind"] == "python"
+    }
+    js_packages = {
+        gap["name"]
+        for gap in gaps
+        if gap["kind"] == "js"
+    }
+    patches = []
+
+    if python_packages and not _preview_contains_path(entries, "backend/requirements.txt"):
+        code = _build_requirements_patch(project_path, python_packages)
+
+        if code:
+            patches.append({
+                "path": "backend/requirements.txt",
+                "code": code,
+                "dependency_patch": True,
+            })
+
+    if js_packages and not _preview_contains_path(entries, "frontend/package.json"):
+        code = _build_package_json_patch(project_path, js_packages)
+
+        if code:
+            patches.append({
+                "path": "frontend/package.json",
+                "code": code,
+                "dependency_patch": True,
+            })
+
+    return patches
 
 
 PROJECT_CONTEXT_FILE_CATEGORIES = {
@@ -786,6 +912,7 @@ def _build_code_files_preview_from_files(files, workspace_dir):
             "target_path": target_path,
             "exists": os.path.exists(target_path),
             "code": file["code"],
+            "dependency_patch": file.get("dependency_patch", False),
         })
 
     return {
@@ -880,6 +1007,7 @@ def build_project_code_files_preview(project_name, prompt, workspace_dir="worksp
             }
 
     project_workspace = os.path.join(workspace_dir, context["project_name"])
+    files = files + build_dependency_patch_entries(project_workspace, files)
     preview = _build_code_files_preview_from_files(files, project_workspace)
 
     if not preview["ok"]:
@@ -952,6 +1080,7 @@ def _build_project_preview_from_generated_output(project_name, prompt, generated
             }
 
     project_workspace = os.path.join(workspace_dir, context["project_name"])
+    files = files + build_dependency_patch_entries(project_workspace, files)
     preview = _build_code_files_preview_from_files(files, project_workspace)
 
     if not preview["ok"]:

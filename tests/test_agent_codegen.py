@@ -339,6 +339,14 @@ def build_report():
     ]
     assert "DEPENDENCY WARNINGS:" in preview["output"]
     assert "pandas" in preview["output"]
+    dependency_file = next(
+        file
+        for file in preview["files"]
+        if file["display_path"] == "demo_app/backend/requirements.txt"
+    )
+    assert dependency_file["dependency_patch"] is True
+    assert dependency_file["code"] == "flask\npandas"
+    assert "- workspace/demo_app/backend/requirements.txt (overwrite)" in preview["output"]
 
 
 def test_project_preview_warns_for_missing_js_dependency(monkeypatch, tmp_path):
@@ -376,6 +384,14 @@ export default function App() {
         "demo_app/frontend/src/App.jsx: JS package 'axios' is not declared in frontend/package.json"
     ]
     assert "axios" in preview["output"]
+    dependency_file = next(
+        file
+        for file in preview["files"]
+        if file["display_path"] == "demo_app/frontend/package.json"
+    )
+    assert dependency_file["dependency_patch"] is True
+    assert json.loads(dependency_file["code"])["dependencies"]["axios"] == "latest"
+    assert "- workspace/demo_app/frontend/package.json (overwrite)" in preview["output"]
 
 
 def test_build_project_repair_files_preview_uses_validation_output(monkeypatch, tmp_path):

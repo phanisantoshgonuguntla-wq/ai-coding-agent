@@ -20,6 +20,13 @@ MODEL_SUGGESTIONS = [
     "qwen2.5-coder:1.5b",
     "phi3",
 ]
+CODEGEN_PROMPT_PRESETS = {
+    "Add API route": "Add a backend API route and any frontend API helper needed to call it.",
+    "Add React component": "Add a reusable React component with styling and wire it into the current UI.",
+    "Add database field": "Add a new database field end to end, including schema, models, API handling, and UI display.",
+    "Add export feature": "Add a CSV export feature for the main records in this project.",
+    "Add search/filter": "Add search and filter support for the main records in this project.",
+}
 
 
 def list_projects():
@@ -180,11 +187,17 @@ elif mode == "Modify an existing app":
         command = f"modify app {project_name} {change_request.strip()}"
 
 elif mode == "Generate code":
+    preset_label = st.selectbox(
+        "Prompt preset",
+        ["Custom prompt"] + list(CODEGEN_PROMPT_PRESETS.keys()),
+    )
+    preset_prompt = CODEGEN_PROMPT_PRESETS.get(preset_label, "")
     code_prompt = st.text_area(
         "Describe the code you want",
-        placeholder="Example: Write a Python function that validates email addresses.",
+        placeholder=preset_prompt or "Example: Write a Python function that validates email addresses.",
         height=140,
     )
+    effective_code_prompt = code_prompt.strip() or preset_prompt
     save_to_file = st.checkbox("Save to file")
     multiple_files = False
     save_path = ""
@@ -227,7 +240,7 @@ elif mode == "Generate code":
         saved_preview = st.session_state.get(preview_state_key)
         preview_matches_input = (
             saved_preview
-            and saved_preview.get("prompt") == code_prompt.strip()
+            and saved_preview.get("prompt") == effective_code_prompt
             and saved_preview.get("project_name", "") == project_name
         )
         overwrite_confirmed = False
@@ -239,7 +252,7 @@ elif mode == "Generate code":
         repair_matches_input = (
             project_aware
             and repair_preview
-            and repair_preview.get("prompt") == code_prompt.strip()
+            and repair_preview.get("prompt") == effective_code_prompt
             and repair_preview.get("project_name") == project_name
         )
         repair_overwrite_confirmed = False
@@ -283,7 +296,7 @@ elif mode == "Generate code":
                     session = agent.record_codegen_session(
                         "repair",
                         project_name,
-                        code_prompt.strip(),
+                        effective_code_prompt,
                         repair_preview["files"],
                         validation_output,
                         repair_preview.get("dependency_warnings", []),
@@ -294,34 +307,34 @@ elif mode == "Generate code":
                     )
 
         if project_aware and st.button("Explain context"):
-            if not code_prompt.strip():
+            if not effective_code_prompt:
                 direct_output = "Use format: explain project context <project_name> <prompt>"
             else:
                 direct_output = agent.explain_project_context(
                     project_name,
-                    code_prompt.strip(),
+                    effective_code_prompt,
                 )
 
         preview_col, save_col = st.columns(2)
 
         if preview_col.button("Preview files", type="primary"):
-            if not code_prompt.strip():
+            if not effective_code_prompt:
                 direct_output = "Use format: preview code files <prompt>"
             else:
                 with st.spinner("Generating file previews..."):
                     if project_aware:
                         preview = agent.build_project_code_files_preview(
                             project_name,
-                            code_prompt.strip(),
+                            effective_code_prompt,
                         )
                     else:
                         preview = agent.build_generated_code_files_preview(
-                            code_prompt.strip(),
+                            effective_code_prompt,
                         )
 
                 if preview["ok"]:
                     st.session_state[preview_state_key] = {
-                        "prompt": code_prompt.strip(),
+                        "prompt": effective_code_prompt,
                         "project_name": project_name,
                         "files": preview["files"],
                         "has_existing_files": preview["has_existing_files"],
@@ -334,14 +347,14 @@ elif mode == "Generate code":
                 direct_output = preview["output"]
 
         if save_col.button("Save files"):
-            if not code_prompt.strip():
+            if not effective_code_prompt:
                 direct_output = "Use format: save code files <prompt>"
             else:
                 preview = st.session_state.get(preview_state_key)
 
                 if (
                     not preview
-                    or preview.get("prompt") != code_prompt.strip()
+                    or preview.get("prompt") != effective_code_prompt
                     or preview.get("project_name", "") != project_name
                 ):
                     direct_output = "Please preview this exact prompt before saving."
@@ -377,13 +390,13 @@ elif mode == "Generate code":
                                 with st.spinner("Generating repair preview..."):
                                     repair_preview = agent.build_project_repair_files_preview(
                                         project_name,
-                                        code_prompt.strip(),
+                                        effective_code_prompt,
                                         validation_output,
                                     )
 
                                 if repair_preview["ok"]:
                                     st.session_state[repair_state_key] = {
-                                        "prompt": code_prompt.strip(),
+                                        "prompt": effective_code_prompt,
                                         "project_name": project_name,
                                         "files": repair_preview["files"],
                                         "has_existing_files": repair_preview["has_existing_files"],
@@ -408,7 +421,7 @@ elif mode == "Generate code":
                         session = agent.record_codegen_session(
                             "project_save",
                             project_name,
-                            code_prompt.strip(),
+                            effective_code_prompt,
                             preview["files"],
                             validation_output,
                             preview.get("dependency_warnings", []),
@@ -422,7 +435,7 @@ elif mode == "Generate code":
         preview_matches_input = (
             saved_preview
             and saved_preview.get("path") == save_path.strip()
-            and saved_preview.get("prompt") == code_prompt.strip()
+            and saved_preview.get("prompt") == effective_code_prompt
         )
         overwrite_confirmed = False
 
@@ -432,19 +445,19 @@ elif mode == "Generate code":
         preview_col, save_col = st.columns(2)
 
         if preview_col.button("Preview file", type="primary"):
-            if not save_path.strip() or not code_prompt.strip():
+            if not save_path.strip() or not effective_code_prompt:
                 direct_output = "Use format: preview code file <workspace_path> <prompt>"
             else:
                 with st.spinner("Generating preview..."):
                     preview = agent.build_generated_code_preview(
                         save_path.strip(),
-                        code_prompt.strip(),
+                        effective_code_prompt,
                     )
 
                 if preview["ok"]:
                     st.session_state["generated_code_preview"] = {
                         "path": save_path.strip(),
-                        "prompt": code_prompt.strip(),
+                        "prompt": effective_code_prompt,
                         "code": preview["code"],
                         "exists": preview["exists"],
                         "output": preview["output"],
@@ -455,7 +468,7 @@ elif mode == "Generate code":
                 direct_output = preview["output"]
 
         if save_col.button("Save file"):
-            if not save_path.strip() or not code_prompt.strip():
+            if not save_path.strip() or not effective_code_prompt:
                 direct_output = "Use format: save code file <workspace_path> <prompt>"
             else:
                 preview = st.session_state.get("generated_code_preview")
@@ -463,7 +476,7 @@ elif mode == "Generate code":
                 if (
                     not preview
                     or preview.get("path") != save_path.strip()
-                    or preview.get("prompt") != code_prompt.strip()
+                    or preview.get("prompt") != effective_code_prompt
                 ):
                     direct_output = (
                         "Please preview this exact path and prompt before saving."
@@ -477,7 +490,7 @@ elif mode == "Generate code":
                     )
     else:
         if st.button("Generate code", type="primary"):
-            command = f"generate code {code_prompt.strip()}"
+            command = f"generate code {effective_code_prompt}"
 
 elif mode == "Run or inspect a project":
     if not projects:
