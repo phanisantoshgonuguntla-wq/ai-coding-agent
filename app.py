@@ -279,6 +279,15 @@ elif mode == "Generate code":
                             f"validate app {project_name}"
                         )
 
+        if project_aware and st.button("Explain context"):
+            if not code_prompt.strip():
+                direct_output = "Use format: explain project context <project_name> <prompt>"
+            else:
+                direct_output = agent.explain_project_context(
+                    project_name,
+                    code_prompt.strip(),
+                )
+
         preview_col, save_col = st.columns(2)
 
         if preview_col.button("Preview files", type="primary"):

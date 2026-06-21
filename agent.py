@@ -133,6 +133,9 @@ AI Coding Agent commands:
 - save project code <project_name> <prompt>
   Generate and save project-aware changes under workspace/<project_name>.
 
+- explain project context <project_name> <prompt>
+  Show which project files would be included as context for a prompt.
+
 - quality check <project_name>
   Inspect generated project quality.
 
@@ -1773,6 +1776,10 @@ def preview_project_repair_files(project_name, prompt, validation_output):
         validation_output,
         WORKSPACE_DIR,
     )
+
+
+def explain_project_context(project_name, prompt):
+    return agent_codegen.explain_project_context(project_name, prompt, WORKSPACE_DIR)
 
 
 def run_agent(user_input):

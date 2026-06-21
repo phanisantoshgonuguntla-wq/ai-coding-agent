@@ -201,6 +201,47 @@ export default function App() {
     assert "frontend/src/App.jsx" in prompts[0][1]
 
 
+def test_select_project_context_files_chooses_frontend_files():
+    files = agent_codegen.select_project_context_files("add a React button and style it")
+
+    assert "project_spec.json" in files
+    assert "project_config.json" in files
+    assert "frontend/src/App.jsx" in files
+    assert "frontend/src/style.css" in files
+    assert "backend/routes.py" not in files
+
+
+def test_select_project_context_files_chooses_database_and_backend_files():
+    files = agent_codegen.select_project_context_files("add API route and database field")
+
+    assert "project_spec.json" in files
+    assert "backend/routes.py" in files
+    assert "backend/database.py" in files
+    assert "backend/models.py" in files
+    assert "frontend/src/App.jsx" not in files
+
+
+def test_explain_project_context_lists_selected_existing_files(tmp_path):
+    project_path = tmp_path / "demo_app"
+    app_file = project_path / "frontend" / "src" / "App.jsx"
+    app_file.parent.mkdir(parents=True)
+    app_file.write_text("export default function App() { return null; }\n", encoding="utf-8")
+    (project_path / "project_spec.json").write_text(
+        json.dumps({"app_type": "React + Flask + SQLite"}),
+        encoding="utf-8",
+    )
+
+    output = agent_codegen.explain_project_context(
+        "demo_app",
+        "add a frontend button",
+        workspace_dir=str(tmp_path),
+    )
+
+    assert "PROJECT CONTEXT" in output
+    assert "frontend/src/App.jsx" in output
+    assert "project_spec.json" in output
+
+
 def test_build_project_code_files_preview_rejects_missing_project(tmp_path):
     preview = agent_codegen.build_project_code_files_preview(
         "missing_app",

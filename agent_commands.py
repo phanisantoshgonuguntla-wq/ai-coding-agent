@@ -201,6 +201,15 @@ def _save_project_code(user_input, ctx):
     return ctx["save_generated_project_code_files"](parts[0], parts[1])
 
 
+def _explain_project_context(user_input, ctx):
+    parts = strip_command_prefix(user_input, "explain project context").split(maxsplit=1)
+
+    if len(parts) < 2:
+        return "Use format: explain project context <project_name> <prompt>"
+
+    return ctx["explain_project_context"](parts[0], parts[1])
+
+
 def build_command_registry(ctx):
     return [
         Command(
@@ -217,6 +226,11 @@ def build_command_registry(ctx):
             "create_app",
             lambda text, lower: lower.startswith("create app "),
             lambda text: ctx["create_app_workflow"](text),
+        ),
+        Command(
+            "explain_project_context",
+            lambda text, lower: lower == "explain project context" or lower.startswith("explain project context "),
+            lambda text: _explain_project_context(text, ctx),
         ),
         Command(
             "preview_project_code",

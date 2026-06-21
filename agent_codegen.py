@@ -224,7 +224,107 @@ def _read_context_file(project_path, relative_path, max_chars=4000):
 """
 
 
-def build_project_context(project_name, workspace_dir="workspace"):
+PROJECT_CONTEXT_FILE_CATEGORIES = {
+    "metadata": [
+        "project_spec.json",
+        "project_config.json",
+    ],
+    "backend": [
+        "backend/app.py",
+        "backend/routes.py",
+        "backend/Program.cs",
+        "backend/index.php",
+    ],
+    "database": [
+        "backend/models.py",
+        "backend/database.py",
+        "backend/database.php",
+    ],
+    "frontend": [
+        "frontend/package.json",
+        "frontend/src/App.jsx",
+        "frontend/src/api.js",
+        "frontend/src/style.css",
+    ],
+    "dependencies": [
+        "backend/requirements.txt",
+        "backend/GeneratedApp.Api.csproj",
+        "frontend/package.json",
+    ],
+}
+
+
+PROJECT_CONTEXT_KEYWORDS = {
+    "backend": [
+        "api",
+        "backend",
+        "endpoint",
+        "route",
+        "flask",
+        "controller",
+        "server",
+        "request",
+        "response",
+    ],
+    "database": [
+        "database",
+        "sqlite",
+        "schema",
+        "table",
+        "model",
+        "field",
+        "column",
+        "persist",
+        "storage",
+    ],
+    "frontend": [
+        "frontend",
+        "react",
+        "ui",
+        "button",
+        "form",
+        "page",
+        "component",
+        "style",
+        "css",
+        "screen",
+        "display",
+    ],
+    "dependencies": [
+        "dependency",
+        "dependencies",
+        "package",
+        "install",
+        "requirements",
+        "npm",
+        "library",
+        "import",
+    ],
+}
+
+
+def select_project_context_files(prompt):
+    prompt_lower = prompt.lower()
+    selected_categories = ["metadata"]
+
+    for category, keywords in PROJECT_CONTEXT_KEYWORDS.items():
+        if any(keyword in prompt_lower for keyword in keywords):
+            selected_categories.append(category)
+
+    if selected_categories == ["metadata"]:
+        selected_categories.extend(["backend", "frontend"])
+
+    selected_files = []
+
+    for category in selected_categories:
+        for file_path in PROJECT_CONTEXT_FILE_CATEGORIES[category]:
+            if file_path not in selected_files:
+                selected_files.append(file_path)
+
+    return selected_files
+
+
+def build_project_context(project_name, prompt="", workspace_dir="workspace"):
     project_name = project_name.strip()
 
     if not project_name:
@@ -254,24 +354,15 @@ def build_project_context(project_name, workspace_dir="workspace"):
     spec = _load_project_spec(project_path)
     stack_key = spec.get("stack_key", "unknown")
     stack_label = spec.get("app_type", stack_key)
-    context_files = [
-        "project_spec.json",
-        "project_config.json",
-        "backend/app.py",
-        "backend/routes.py",
-        "backend/models.py",
-        "backend/database.py",
-        "backend/Program.cs",
-        "backend/index.php",
-        "backend/database.php",
-        "frontend/package.json",
-        "frontend/src/App.jsx",
-        "frontend/src/api.js",
-        "frontend/src/style.css",
+    context_files = select_project_context_files(prompt)
+    existing_context_files = [
+        relative_path
+        for relative_path in context_files
+        if os.path.exists(os.path.join(project_path, relative_path))
     ]
     file_context = "".join(
         _read_context_file(project_path, relative_path)
-        for relative_path in context_files
+        for relative_path in existing_context_files
     ).strip()
     spec_summary = json.dumps(spec, indent=2) if spec else "{}"
 
@@ -281,6 +372,7 @@ def build_project_context(project_name, workspace_dir="workspace"):
         "project_path": project_path,
         "stack_key": stack_key,
         "stack_label": stack_label,
+        "context_files": existing_context_files,
         "context": f"""
 PROJECT:
 {project_name}
@@ -295,6 +387,25 @@ RELEVANT FILES:
 {file_context or "No recognized context files found."}
 """.strip(),
     }
+
+
+def explain_project_context(project_name, prompt, workspace_dir="workspace"):
+    context = build_project_context(project_name, prompt, workspace_dir)
+
+    if not context["ok"]:
+        return context["output"]
+
+    return f"""PROJECT CONTEXT
+
+PROJECT:
+{context["project_name"]}
+
+STACK:
+{context["stack_label"]}
+
+INCLUDED FILES:
+{chr(10).join(context["context_files"]) if context["context_files"] else "None"}
+"""
 
 
 def parse_generated_code_files(text):
@@ -432,6 +543,17 @@ def _format_multi_file_preview(entries):
     ])
 
 
+def _format_project_multi_file_preview(entries, context_files):
+    context_section = [
+        "PROJECT CONTEXT FILES:",
+        *(context_files or ["None"]),
+        "",
+        "====================",
+        "",
+    ]
+    return "\n".join(context_section) + _format_multi_file_preview(entries)
+
+
 def _build_code_files_preview_from_files(files, workspace_dir):
     entries = []
     seen_paths = set()
@@ -519,7 +641,7 @@ def build_project_code_files_preview(project_name, prompt, workspace_dir="worksp
             "output": "Please provide a project-aware code generation prompt.",
         }
 
-    context = build_project_context(project_name, workspace_dir)
+    context = build_project_context(project_name, prompt, workspace_dir)
 
     if not context["ok"]:
         return context
@@ -575,14 +697,18 @@ def build_project_code_files_preview(project_name, prompt, workspace_dir="worksp
     return {
         "ok": True,
         "project_name": context["project_name"],
+        "context_files": context["context_files"],
         "files": preview["files"],
         "has_existing_files": preview["has_existing_files"],
-        "output": _format_multi_file_preview(preview["files"]),
+        "output": _format_project_multi_file_preview(
+            preview["files"],
+            context["context_files"],
+        ),
     }
 
 
-def _build_project_preview_from_generated_output(project_name, generated_output, workspace_dir):
-    context = build_project_context(project_name, workspace_dir)
+def _build_project_preview_from_generated_output(project_name, prompt, generated_output, workspace_dir):
+    context = build_project_context(project_name, prompt, workspace_dir)
 
     if not context["ok"]:
         return context
@@ -636,9 +762,13 @@ def _build_project_preview_from_generated_output(project_name, generated_output,
     return {
         "ok": True,
         "project_name": context["project_name"],
+        "context_files": context["context_files"],
         "files": preview["files"],
         "has_existing_files": preview["has_existing_files"],
-        "output": _format_multi_file_preview(preview["files"]),
+        "output": _format_project_multi_file_preview(
+            preview["files"],
+            context["context_files"],
+        ),
     }
 
 
@@ -660,7 +790,7 @@ def build_project_repair_files_preview(project_name, prompt, validation_output, 
             "output": "Please provide validation output to repair.",
         }
 
-    context = build_project_context(project_name, workspace_dir)
+    context = build_project_context(project_name, prompt, workspace_dir)
 
     if not context["ok"]:
         return context
@@ -673,6 +803,7 @@ def build_project_repair_files_preview(project_name, prompt, validation_output, 
 
     preview = _build_project_preview_from_generated_output(
         project_name,
+        prompt,
         generated_output,
         workspace_dir,
     )
