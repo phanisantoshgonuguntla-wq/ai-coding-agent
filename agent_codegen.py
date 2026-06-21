@@ -1,5 +1,6 @@
 import difflib
 import os
+import re
 
 from agent_llm import invoke_llm
 from agent_text import clean_code_output
@@ -23,6 +24,42 @@ Rules:
 - Do not include explanations
 - Include imports when needed
 - Keep the code complete and runnable when possible
+"""
+
+    try:
+        return clean_code_output(invoke_llm(generation_prompt))
+    except RuntimeError as error:
+        return str(error)
+
+
+def generate_code_files(prompt):
+    prompt = prompt.strip()
+
+    if not prompt:
+        return "Please provide a multi-file code generation prompt."
+
+    generation_prompt = f"""
+You are a focused coding assistant.
+
+Generate one or more complete code files for this request:
+{prompt}
+
+STRICT OUTPUT FORMAT:
+
+file: path/to/file.ext
+<complete file contents>
+
+file: path/to/another_file.ext
+<complete file contents>
+
+Rules:
+- Return only file sections
+- Every file MUST start with: file: <relative_path>
+- Do not include markdown fences
+- Do not include explanations
+- Use relative paths only
+- Include imports when needed
+- Keep each file complete and runnable when possible
 """
 
     try:
@@ -63,6 +100,41 @@ def _normalize_workspace_path(file_path, workspace_dir):
 
 def _looks_like_generation_error(text):
     return text.lstrip().startswith("Ollama ")
+
+
+def parse_generated_code_files(text):
+    files = []
+    current_path = None
+    current_lines = []
+
+    for line in text.splitlines():
+        match = re.match(r"^\s*file:\s*(.+?)\s*$", line, flags=re.IGNORECASE)
+
+        if match:
+            if current_path is not None:
+                files.append({
+                    "path": current_path,
+                    "code": "\n".join(current_lines).strip(),
+                })
+
+            current_path = match.group(1).strip()
+            current_lines = []
+            continue
+
+        if current_path is not None:
+            current_lines.append(line)
+
+    if current_path is not None:
+        files.append({
+            "path": current_path,
+            "code": "\n".join(current_lines).strip(),
+        })
+
+    return [
+        file
+        for file in files
+        if file["path"] and file["code"]
+    ]
 
 
 def _format_preview(relative_path, target_path, code):
@@ -140,8 +212,110 @@ def build_generated_code_preview(file_path, prompt, workspace_dir="workspace"):
     }
 
 
+def _format_multi_file_preview(entries):
+    summary_lines = [
+        "GENERATED CODE FILES PREVIEW",
+        "",
+        "FILES:",
+    ]
+
+    for entry in entries:
+        status = "overwrite" if entry["exists"] else "create"
+        summary_lines.append(f"- workspace/{entry['display_path']} ({status})")
+
+    file_sections = [
+        _format_preview(
+            entry["relative_path"],
+            entry["target_path"],
+            entry["code"],
+        )
+        for entry in entries
+    ]
+
+    return "\n".join(summary_lines + ["", "====================", ""] + [
+        "\n\n====================\n\n".join(file_sections)
+    ])
+
+
+def build_generated_code_files_preview(prompt, workspace_dir="workspace"):
+    prompt = prompt.strip()
+
+    if not prompt:
+        return {
+            "ok": False,
+            "error": "Please provide a multi-file code generation prompt.",
+            "output": "Please provide a multi-file code generation prompt.",
+        }
+
+    generated_output = generate_code_files(prompt)
+
+    if _looks_like_generation_error(generated_output):
+        return {
+            "ok": False,
+            "error": generated_output,
+            "output": generated_output,
+        }
+
+    files = parse_generated_code_files(generated_output)
+
+    if not files:
+        return {
+            "ok": False,
+            "error": "No file sections were generated.",
+            "output": (
+                "No file sections were generated. "
+                "Expected format: file: path/to/file.ext"
+            ),
+        }
+
+    entries = []
+    seen_paths = set()
+
+    for file in files:
+        try:
+            relative_path, target_path = _normalize_workspace_path(
+                file["path"],
+                workspace_dir,
+            )
+        except ValueError as error:
+            return {
+                "ok": False,
+                "error": str(error),
+                "output": str(error),
+            }
+
+        normalized_key = relative_path.replace("\\", "/").lower()
+
+        if normalized_key in seen_paths:
+            return {
+                "ok": False,
+                "error": f"Duplicate generated file path: {file['path']}",
+                "output": f"Duplicate generated file path: {file['path']}",
+            }
+
+        seen_paths.add(normalized_key)
+        entries.append({
+            "relative_path": relative_path,
+            "display_path": relative_path.replace("\\", "/"),
+            "target_path": target_path,
+            "exists": os.path.exists(target_path),
+            "code": file["code"],
+        })
+
+    return {
+        "ok": True,
+        "files": entries,
+        "has_existing_files": any(entry["exists"] for entry in entries),
+        "output": _format_multi_file_preview(entries),
+    }
+
+
 def preview_generated_code(file_path, prompt, workspace_dir="workspace"):
     return build_generated_code_preview(file_path, prompt, workspace_dir)["output"]
+
+
+def preview_generated_code_files(prompt, workspace_dir="workspace"):
+    return build_generated_code_files_preview(prompt, workspace_dir)["output"]
 
 
 def save_code_content(file_path, code, workspace_dir="workspace"):
@@ -171,6 +345,42 @@ CODE:
 """
 
 
+def save_code_files_content(files, workspace_dir="workspace"):
+    if not files:
+        return "Please preview generated code files before saving."
+
+    saved_paths = []
+
+    for file in files:
+        code = file.get("code", "")
+
+        if not code.strip():
+            return "Generated file content cannot be empty."
+
+        try:
+            relative_path, target_path = _normalize_workspace_path(
+                file["relative_path"],
+                workspace_dir,
+            )
+        except ValueError as error:
+            return str(error)
+
+        os.makedirs(os.path.dirname(target_path), exist_ok=True)
+
+        with open(target_path, "w", encoding="utf-8") as f:
+            f.write(code)
+            f.write("\n")
+
+        display_path = relative_path.replace("\\", "/")
+        saved_paths.append(f"workspace/{display_path}")
+
+    return f"""CODE FILES SAVED
+
+FILES:
+{chr(10).join(saved_paths)}
+"""
+
+
 def save_generated_code(file_path, prompt, workspace_dir="workspace"):
     preview = build_generated_code_preview(file_path, prompt, workspace_dir)
 
@@ -178,3 +388,12 @@ def save_generated_code(file_path, prompt, workspace_dir="workspace"):
         return preview["output"]
 
     return save_code_content(file_path, preview["code"], workspace_dir)
+
+
+def save_generated_code_files(prompt, workspace_dir="workspace"):
+    preview = build_generated_code_files_preview(prompt, workspace_dir)
+
+    if not preview["ok"]:
+        return preview["output"]
+
+    return save_code_files_content(preview["files"], workspace_dir)

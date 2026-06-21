@@ -56,6 +56,8 @@ generate code write a Python function that validates email addresses
 preview code file snippets/email_validator.py write a Python function that validates email addresses
 save code file snippets/email_validator.py write a Python function that validates email addresses
 generate code file snippets/email_validator.py write a Python function that validates email addresses
+preview code files create snippets/math.py and snippets/text.py helper modules
+save code files create snippets/math.py and snippets/text.py helper modules
 run fullstack <project_name>
 validate app <project_name>
 refresh project ports <project_name>
@@ -64,7 +66,7 @@ stop fullstack <project_name>
 stop all apps
 ```
 
-For generated code files, preview first and then save so the written file matches the reviewed output. If the target file already exists, the preview includes a diff before overwrite.
+For generated code files, preview first and then save so the written file matches the reviewed output. If a target file already exists, the preview includes a diff before overwrite. Multi-file generation previews every target file before saving them together.
 
 ## GitHub Notes
 

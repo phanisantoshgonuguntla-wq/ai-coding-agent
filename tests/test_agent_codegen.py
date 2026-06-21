@@ -30,6 +30,130 @@ def test_generate_code_returns_runtime_error_message(monkeypatch):
     assert agent_codegen.generate_code("write hello world") == "Ollama is not running"
 
 
+def test_parse_generated_code_files_reads_file_sections():
+    output = """file: snippets/math.py
+def add(a, b):
+    return a + b
+
+file: snippets/text.py
+def shout(text):
+    return text.upper()
+"""
+
+    files = agent_codegen.parse_generated_code_files(output)
+
+    assert files == [
+        {
+            "path": "snippets/math.py",
+            "code": "def add(a, b):\n    return a + b",
+        },
+        {
+            "path": "snippets/text.py",
+            "code": "def shout(text):\n    return text.upper()",
+        },
+    ]
+
+
+def test_build_generated_code_files_preview_returns_all_files(monkeypatch, tmp_path):
+    def fake_generate_code_files(prompt):
+        return """file: snippets/math.py
+def add(a, b):
+    return a + b
+
+file: snippets/text.py
+def shout(text):
+    return text.upper()
+"""
+
+    monkeypatch.setattr(agent_codegen, "generate_code_files", fake_generate_code_files)
+
+    preview = agent_codegen.build_generated_code_files_preview(
+        "write helpers",
+        workspace_dir=str(tmp_path),
+    )
+
+    assert preview["ok"] is True
+    assert preview["has_existing_files"] is False
+    assert [file["display_path"] for file in preview["files"]] == [
+        "snippets/math.py",
+        "snippets/text.py",
+    ]
+    assert "GENERATED CODE FILES PREVIEW" in preview["output"]
+    assert "- workspace/snippets/math.py (create)" in preview["output"]
+    assert "- workspace/snippets/text.py (create)" in preview["output"]
+    assert not (tmp_path / "snippets" / "math.py").exists()
+
+
+def test_build_generated_code_files_preview_includes_existing_file_diff(monkeypatch, tmp_path):
+    target = tmp_path / "snippets" / "math.py"
+    target.parent.mkdir()
+    target.write_text("old code\n", encoding="utf-8")
+
+    def fake_generate_code_files(prompt):
+        return """file: snippets/math.py
+new code
+"""
+
+    monkeypatch.setattr(agent_codegen, "generate_code_files", fake_generate_code_files)
+
+    preview = agent_codegen.build_generated_code_files_preview(
+        "rewrite helper",
+        workspace_dir=str(tmp_path),
+    )
+
+    assert preview["ok"] is True
+    assert preview["has_existing_files"] is True
+    assert "- workspace/snippets/math.py (overwrite)" in preview["output"]
+    assert "DIFF:" in preview["output"]
+    assert "-old code" in preview["output"]
+    assert "+new code" in preview["output"]
+
+
+def test_build_generated_code_files_preview_rejects_duplicate_paths(monkeypatch, tmp_path):
+    def fake_generate_code_files(prompt):
+        return """file: snippets/math.py
+first
+
+file: snippets/math.py
+second
+"""
+
+    monkeypatch.setattr(agent_codegen, "generate_code_files", fake_generate_code_files)
+
+    preview = agent_codegen.build_generated_code_files_preview(
+        "write duplicate files",
+        workspace_dir=str(tmp_path),
+    )
+
+    assert preview["ok"] is False
+    assert preview["output"] == "Duplicate generated file path: snippets/math.py"
+
+
+def test_save_code_files_content_writes_all_previewed_files(tmp_path):
+    files = [
+        {
+            "relative_path": "snippets/math.py",
+            "code": "def add(a, b):\n    return a + b",
+        },
+        {
+            "relative_path": "snippets/text.py",
+            "code": "def shout(text):\n    return text.upper()",
+        },
+    ]
+
+    output = agent_codegen.save_code_files_content(files, workspace_dir=str(tmp_path))
+
+    assert (tmp_path / "snippets" / "math.py").read_text(encoding="utf-8") == (
+        "def add(a, b):\n    return a + b\n"
+    )
+    assert (tmp_path / "snippets" / "text.py").read_text(encoding="utf-8") == (
+        "def shout(text):\n    return text.upper()\n"
+    )
+    assert "CODE FILES SAVED" in output
+    assert "workspace/snippets/math.py" in output
+    assert "workspace/snippets/text.py" in output
+
+
 def test_save_generated_code_writes_under_workspace(monkeypatch, tmp_path):
     def fake_generate_code(prompt):
         return "def add_numbers(a, b):\n    return a + b"

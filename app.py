@@ -177,15 +177,70 @@ elif mode == "Generate code":
         height=140,
     )
     save_to_file = st.checkbox("Save to file")
+    multiple_files = False
     save_path = ""
 
     if save_to_file:
+        multiple_files = st.checkbox("Generate multiple files")
+
+    if save_to_file and not multiple_files:
         save_path = st.text_input(
             "Workspace path",
             placeholder="Example: snippets/email_validator.py",
         )
 
-    if save_to_file:
+    if save_to_file and multiple_files:
+        saved_preview = st.session_state.get("generated_code_files_preview")
+        preview_matches_input = (
+            saved_preview
+            and saved_preview.get("prompt") == code_prompt.strip()
+        )
+        overwrite_confirmed = False
+
+        if preview_matches_input and saved_preview.get("has_existing_files"):
+            overwrite_confirmed = st.checkbox("Confirm overwrite existing files")
+
+        preview_col, save_col = st.columns(2)
+
+        if preview_col.button("Preview files", type="primary"):
+            if not code_prompt.strip():
+                direct_output = "Use format: preview code files <prompt>"
+            else:
+                with st.spinner("Generating file previews..."):
+                    preview = agent.build_generated_code_files_preview(
+                        code_prompt.strip(),
+                    )
+
+                if preview["ok"]:
+                    st.session_state["generated_code_files_preview"] = {
+                        "prompt": code_prompt.strip(),
+                        "files": preview["files"],
+                        "has_existing_files": preview["has_existing_files"],
+                        "output": preview["output"],
+                    }
+                else:
+                    st.session_state.pop("generated_code_files_preview", None)
+
+                direct_output = preview["output"]
+
+        if save_col.button("Save files"):
+            if not code_prompt.strip():
+                direct_output = "Use format: save code files <prompt>"
+            else:
+                preview = st.session_state.get("generated_code_files_preview")
+
+                if (
+                    not preview
+                    or preview.get("prompt") != code_prompt.strip()
+                ):
+                    direct_output = "Please preview this exact prompt before saving."
+                elif preview.get("has_existing_files") and not overwrite_confirmed:
+                    direct_output = "Please confirm overwrite before saving existing files."
+                else:
+                    direct_output = agent.save_code_files_content(
+                        preview["files"],
+                    )
+    elif save_to_file:
         saved_preview = st.session_state.get("generated_code_preview")
         preview_matches_input = (
             saved_preview
