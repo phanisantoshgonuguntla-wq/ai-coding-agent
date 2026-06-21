@@ -53,6 +53,9 @@ Inside the Streamlit UI, use the guided modes or run commands such as:
 ```text
 create app build a customer tracker with name, email, phone, and notes
 generate code write a Python function that validates email addresses
+preview code file snippets/email_validator.py write a Python function that validates email addresses
+save code file snippets/email_validator.py write a Python function that validates email addresses
+generate code file snippets/email_validator.py write a Python function that validates email addresses
 run fullstack <project_name>
 validate app <project_name>
 refresh project ports <project_name>
@@ -60,6 +63,8 @@ refresh project spec <project_name>
 stop fullstack <project_name>
 stop all apps
 ```
+
+For generated code files, preview first and then save so the written file matches the reviewed output. If the target file already exists, the preview includes a diff before overwrite.
 
 ## GitHub Notes
 

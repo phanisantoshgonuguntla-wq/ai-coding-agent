@@ -134,6 +134,7 @@ mode = st.radio(
 
 projects = list_projects()
 command = ""
+direct_output = ""
 
 if mode == "Build a new app":
     stack_options = {
@@ -175,9 +176,76 @@ elif mode == "Generate code":
         placeholder="Example: Write a Python function that validates email addresses.",
         height=140,
     )
+    save_to_file = st.checkbox("Save to file")
+    save_path = ""
 
-    if st.button("Generate code", type="primary"):
-        command = f"generate code {code_prompt.strip()}"
+    if save_to_file:
+        save_path = st.text_input(
+            "Workspace path",
+            placeholder="Example: snippets/email_validator.py",
+        )
+
+    if save_to_file:
+        saved_preview = st.session_state.get("generated_code_preview")
+        preview_matches_input = (
+            saved_preview
+            and saved_preview.get("path") == save_path.strip()
+            and saved_preview.get("prompt") == code_prompt.strip()
+        )
+        overwrite_confirmed = False
+
+        if preview_matches_input and saved_preview.get("exists"):
+            overwrite_confirmed = st.checkbox("Confirm overwrite existing file")
+
+        preview_col, save_col = st.columns(2)
+
+        if preview_col.button("Preview file", type="primary"):
+            if not save_path.strip() or not code_prompt.strip():
+                direct_output = "Use format: preview code file <workspace_path> <prompt>"
+            else:
+                with st.spinner("Generating preview..."):
+                    preview = agent.build_generated_code_preview(
+                        save_path.strip(),
+                        code_prompt.strip(),
+                    )
+
+                if preview["ok"]:
+                    st.session_state["generated_code_preview"] = {
+                        "path": save_path.strip(),
+                        "prompt": code_prompt.strip(),
+                        "code": preview["code"],
+                        "exists": preview["exists"],
+                        "output": preview["output"],
+                    }
+                else:
+                    st.session_state.pop("generated_code_preview", None)
+
+                direct_output = preview["output"]
+
+        if save_col.button("Save file"):
+            if not save_path.strip() or not code_prompt.strip():
+                direct_output = "Use format: save code file <workspace_path> <prompt>"
+            else:
+                preview = st.session_state.get("generated_code_preview")
+
+                if (
+                    not preview
+                    or preview.get("path") != save_path.strip()
+                    or preview.get("prompt") != code_prompt.strip()
+                ):
+                    direct_output = (
+                        "Please preview this exact path and prompt before saving."
+                    )
+                elif preview.get("exists") and not overwrite_confirmed:
+                    direct_output = "Please confirm overwrite before saving this existing file."
+                else:
+                    direct_output = agent.save_code_content(
+                        save_path.strip(),
+                        preview["code"],
+                    )
+    else:
+        if st.button("Generate code", type="primary"):
+            command = f"generate code {code_prompt.strip()}"
 
 elif mode == "Run or inspect a project":
     if not projects:
@@ -222,7 +290,10 @@ else:
     if st.button("Run command", type="primary"):
         command = command_input.strip()
 
-if command:
+if direct_output:
+    st.subheader("Agent response")
+    st.code(direct_output)
+elif command:
     if command.endswith(" ") or command in ["create app", "modify app"]:
         st.warning("Please fill in the required input first.")
     else:

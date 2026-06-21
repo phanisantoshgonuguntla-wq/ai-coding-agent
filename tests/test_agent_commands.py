@@ -11,6 +11,8 @@ def make_context():
         "add_feature": lambda project, feature: f"feature:{project}:{feature}",
         "add_search_feature": lambda project: f"search:{project}",
         "generate_code": lambda prompt: f"code:{prompt}",
+        "preview_generated_code_file": lambda path, prompt: f"preview:{path}:{prompt}",
+        "save_generated_code": lambda path, prompt: f"save:{path}:{prompt}",
         "create_app_workflow": lambda text: f"create:{text}",
     }
 
@@ -34,6 +36,45 @@ def test_build_from_plan_strips_command_prefix():
 
 def test_generate_code_routes_prompt_to_codegen_handler():
     assert agent_commands.run_agent("generate code write a csv parser", make_context()) == "code:write a csv parser"
+
+
+def test_generate_code_file_routes_path_and_prompt_to_save_handler():
+    assert agent_commands.run_agent(
+        "generate code file snippets/parser.py write a csv parser",
+        make_context(),
+    ) == "save:snippets/parser.py:write a csv parser"
+
+
+def test_preview_code_file_routes_path_and_prompt_to_preview_handler():
+    assert agent_commands.run_agent(
+        "preview code file snippets/parser.py write a csv parser",
+        make_context(),
+    ) == "preview:snippets/parser.py:write a csv parser"
+
+
+def test_save_code_file_routes_path_and_prompt_to_save_handler():
+    assert agent_commands.run_agent(
+        "save code file snippets/parser.py write a csv parser",
+        make_context(),
+    ) == "save:snippets/parser.py:write a csv parser"
+
+
+def test_generate_code_file_validates_required_arguments():
+    assert agent_commands.run_agent("generate code file", make_context()) == (
+        "Use format: generate code file <workspace_path> <prompt>"
+    )
+    assert agent_commands.run_agent("generate code file snippets/parser.py", make_context()) == (
+        "Use format: generate code file <workspace_path> <prompt>"
+    )
+
+
+def test_preview_and_save_code_file_validate_required_arguments():
+    assert agent_commands.run_agent("preview code file", make_context()) == (
+        "Use format: preview code file <workspace_path> <prompt>"
+    )
+    assert agent_commands.run_agent("save code file", make_context()) == (
+        "Use format: save code file <workspace_path> <prompt>"
+    )
 
 
 def test_modify_app_validates_required_change_request():

@@ -138,6 +138,33 @@ def _add_feature(user_input, ctx):
     return ctx["add_feature"](parts[2], parts[3])
 
 
+def _generate_code_file(user_input, ctx):
+    parts = strip_command_prefix(user_input, "generate code file").split(maxsplit=1)
+
+    if len(parts) < 2:
+        return "Use format: generate code file <workspace_path> <prompt>"
+
+    return ctx["save_generated_code"](parts[0], parts[1])
+
+
+def _preview_code_file(user_input, ctx):
+    parts = strip_command_prefix(user_input, "preview code file").split(maxsplit=1)
+
+    if len(parts) < 2:
+        return "Use format: preview code file <workspace_path> <prompt>"
+
+    return ctx["preview_generated_code_file"](parts[0], parts[1])
+
+
+def _save_code_file(user_input, ctx):
+    parts = strip_command_prefix(user_input, "save code file").split(maxsplit=1)
+
+    if len(parts) < 2:
+        return "Use format: save code file <workspace_path> <prompt>"
+
+    return ctx["save_generated_code"](parts[0], parts[1])
+
+
 def build_command_registry(ctx):
     return [
         Command(
@@ -154,6 +181,21 @@ def build_command_registry(ctx):
             "create_app",
             lambda text, lower: lower.startswith("create app "),
             lambda text: ctx["create_app_workflow"](text),
+        ),
+        Command(
+            "preview_code_file",
+            lambda text, lower: lower == "preview code file" or lower.startswith("preview code file "),
+            lambda text: _preview_code_file(text, ctx),
+        ),
+        Command(
+            "save_code_file",
+            lambda text, lower: lower == "save code file" or lower.startswith("save code file "),
+            lambda text: _save_code_file(text, ctx),
+        ),
+        Command(
+            "generate_code_file",
+            lambda text, lower: lower == "generate code file" or lower.startswith("generate code file "),
+            lambda text: _generate_code_file(text, ctx),
         ),
         Command(
             "generate_code",

@@ -112,6 +112,15 @@ AI Coding Agent commands:
 - generate code <prompt>
   Generate standalone code from a prompt without writing files.
 
+- generate code file <workspace_path> <prompt>
+  Generate standalone code and save it under workspace/.
+
+- preview code file <workspace_path> <prompt>
+  Preview generated code, target path, and overwrite/create status without writing files.
+
+- save code file <workspace_path> <prompt>
+  Generate standalone code and save it under workspace/.
+
 - quality check <project_name>
   Inspect generated project quality.
 
@@ -1690,6 +1699,22 @@ def add_search_feature(project_name):
 
 def generate_code(prompt):
     return agent_codegen.generate_code(prompt)
+
+
+def preview_generated_code_file(file_path, prompt):
+    return agent_codegen.preview_generated_code(file_path, prompt, WORKSPACE_DIR)
+
+
+def build_generated_code_preview(file_path, prompt):
+    return agent_codegen.build_generated_code_preview(file_path, prompt, WORKSPACE_DIR)
+
+
+def save_code_content(file_path, code):
+    return agent_codegen.save_code_content(file_path, code, WORKSPACE_DIR)
+
+
+def save_generated_code(file_path, prompt):
+    return agent_codegen.save_generated_code(file_path, prompt, WORKSPACE_DIR)
 
 
 def run_agent(user_input):
