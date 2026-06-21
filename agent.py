@@ -1729,6 +1729,15 @@ def build_project_code_files_preview(project_name, prompt):
     return agent_codegen.build_project_code_files_preview(project_name, prompt, WORKSPACE_DIR)
 
 
+def build_project_repair_files_preview(project_name, prompt, validation_output):
+    return agent_codegen.build_project_repair_files_preview(
+        project_name,
+        prompt,
+        validation_output,
+        WORKSPACE_DIR,
+    )
+
+
 def save_code_content(file_path, code):
     return agent_codegen.save_code_content(file_path, code, WORKSPACE_DIR)
 
@@ -1755,6 +1764,15 @@ def preview_project_code_files(project_name, prompt):
 
 def save_generated_project_code_files(project_name, prompt):
     return agent_codegen.save_generated_project_code_files(project_name, prompt, WORKSPACE_DIR)
+
+
+def preview_project_repair_files(project_name, prompt, validation_output):
+    return agent_codegen.preview_project_repair_files(
+        project_name,
+        prompt,
+        validation_output,
+        WORKSPACE_DIR,
+    )
 
 
 def run_agent(user_input):

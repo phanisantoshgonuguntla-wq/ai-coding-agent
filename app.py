@@ -38,6 +38,15 @@ def status_text(is_running):
     return "Running" if is_running else "Stopped"
 
 
+def validation_needs_repair(validation_output):
+    failure_markers = [
+        "FAIL:",
+        "NEEDS ATTENTION",
+        "NEEDS FIX",
+    ]
+    return any(marker in validation_output for marker in failure_markers)
+
+
 def render_project_dashboard(project_name):
     dashboard = tools.get_project_dashboard(project_name)
 
@@ -199,14 +208,22 @@ elif mode == "Generate code":
         if project_aware:
             project_name = st.selectbox("Project", projects)
             validate_after_save = st.checkbox("Validate after save")
+            preview_repair_after_failure = False
+
+            if validate_after_save:
+                preview_repair_after_failure = st.checkbox(
+                    "Preview repair if validation fails"
+                )
         else:
             validate_after_save = False
+            preview_repair_after_failure = False
 
         preview_state_key = (
             "project_code_files_preview"
             if project_aware
             else "generated_code_files_preview"
         )
+        repair_state_key = "project_repair_files_preview"
         saved_preview = st.session_state.get(preview_state_key)
         preview_matches_input = (
             saved_preview
@@ -217,6 +234,50 @@ elif mode == "Generate code":
 
         if preview_matches_input and saved_preview.get("has_existing_files"):
             overwrite_confirmed = st.checkbox("Confirm overwrite existing files")
+
+        repair_preview = st.session_state.get(repair_state_key)
+        repair_matches_input = (
+            project_aware
+            and repair_preview
+            and repair_preview.get("prompt") == code_prompt.strip()
+            and repair_preview.get("project_name") == project_name
+        )
+        repair_overwrite_confirmed = False
+
+        if repair_matches_input:
+            if repair_preview.get("has_existing_files"):
+                repair_overwrite_confirmed = st.checkbox(
+                    "Confirm repair overwrite existing files"
+                )
+
+            if st.button("Save repair preview"):
+                if repair_preview.get("has_existing_files") and not repair_overwrite_confirmed:
+                    direct_output = "Please confirm overwrite before saving repair files."
+                else:
+                    direct_output = agent.save_code_files_content(
+                        repair_preview["files"],
+                    )
+
+                    if validate_after_save:
+                        with st.spinner("Validating repaired project..."):
+                            try:
+                                validation_output = run_agent(
+                                    f"validate app {project_name}"
+                                )
+                            except Exception as error:
+                                validation_output = str(error)
+
+                        direct_output += (
+                            "\n\n====================\n"
+                            "REPAIR VALIDATION RESULT\n"
+                            "====================\n"
+                            f"{validation_output}"
+                        )
+                    else:
+                        direct_output += (
+                            "\n\nNEXT CHECK:\n"
+                            f"validate app {project_name}"
+                        )
 
         preview_col, save_col = st.columns(2)
 
@@ -282,6 +343,35 @@ elif mode == "Generate code":
                                 "====================\n"
                                 f"{validation_output}"
                             )
+
+                            if (
+                                preview_repair_after_failure
+                                and validation_needs_repair(validation_output)
+                            ):
+                                with st.spinner("Generating repair preview..."):
+                                    repair_preview = agent.build_project_repair_files_preview(
+                                        project_name,
+                                        code_prompt.strip(),
+                                        validation_output,
+                                    )
+
+                                if repair_preview["ok"]:
+                                    st.session_state[repair_state_key] = {
+                                        "prompt": code_prompt.strip(),
+                                        "project_name": project_name,
+                                        "files": repair_preview["files"],
+                                        "has_existing_files": repair_preview["has_existing_files"],
+                                        "output": repair_preview["output"],
+                                    }
+                                else:
+                                    st.session_state.pop(repair_state_key, None)
+
+                                direct_output += (
+                                    "\n\n====================\n"
+                                    "REPAIR PREVIEW\n"
+                                    "====================\n"
+                                    f"{repair_preview['output']}"
+                                )
                         else:
                             direct_output += (
                                 "\n\nNEXT CHECK:\n"

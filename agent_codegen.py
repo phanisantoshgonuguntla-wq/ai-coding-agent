@@ -109,6 +109,56 @@ Rules:
         return str(error)
 
 
+def generate_project_repair_files(prompt, project_context, validation_output):
+    prompt = prompt.strip()
+    validation_output = validation_output.strip()
+
+    if not prompt:
+        return "Please provide the original project-aware prompt."
+
+    if not validation_output:
+        return "Please provide validation output to repair."
+
+    generation_prompt = f"""
+You are a focused coding assistant repairing an existing generated project.
+
+Project context:
+{project_context}
+
+Original user request:
+{prompt}
+
+Validation output:
+{validation_output}
+
+Generate the smallest safe repair needed to address the validation failure.
+
+STRICT OUTPUT FORMAT:
+
+file: relative/path/inside/project.ext
+<complete file contents>
+
+file: another/relative/path/inside/project.ext
+<complete file contents>
+
+Rules:
+- Return only file sections
+- Every file MUST start with: file: <relative_path>
+- Paths must be relative to the selected project root
+- Do not prefix paths with workspace/ or the project name
+- Do not include markdown fences
+- Do not include explanations
+- Include complete replacement file contents
+- Preserve the project's stack, ports, API URLs, and existing conventions
+- Change only files needed for the repair
+"""
+
+    try:
+        return clean_code_output(invoke_llm(generation_prompt))
+    except RuntimeError as error:
+        return str(error)
+
+
 def _normalize_workspace_path(file_path, workspace_dir):
     file_path = file_path.strip().replace("\\", "/")
 
@@ -531,6 +581,112 @@ def build_project_code_files_preview(project_name, prompt, workspace_dir="worksp
     }
 
 
+def _build_project_preview_from_generated_output(project_name, generated_output, workspace_dir):
+    context = build_project_context(project_name, workspace_dir)
+
+    if not context["ok"]:
+        return context
+
+    if _looks_like_generation_error(generated_output):
+        return {
+            "ok": False,
+            "error": generated_output,
+            "output": generated_output,
+        }
+
+    files = parse_generated_code_files(generated_output)
+
+    if not files:
+        return {
+            "ok": False,
+            "error": "No file sections were generated.",
+            "output": (
+                "No file sections were generated. "
+                "Expected format: file: path/to/file.ext"
+            ),
+        }
+
+    project_name_for_path = context["project_name"].replace("\\", "/")
+    project_prefix = f"{project_name_for_path}/".lower()
+
+    for file in files:
+        generated_path = file["path"].replace("\\", "/").lower()
+
+        if generated_path.startswith("workspace/") or generated_path.startswith(project_prefix):
+            return {
+                "ok": False,
+                "error": "Project-aware generated paths must be relative to the project root.",
+                "output": "Project-aware generated paths must be relative to the project root.",
+            }
+
+    project_workspace = os.path.join(workspace_dir, context["project_name"])
+    preview = _build_code_files_preview_from_files(files, project_workspace)
+
+    if not preview["ok"]:
+        return preview
+
+    for file in preview["files"]:
+        file["project_relative_path"] = file["relative_path"]
+        file["relative_path"] = os.path.join(
+            context["project_name"],
+            file["project_relative_path"],
+        )
+        file["display_path"] = file["relative_path"].replace("\\", "/")
+
+    return {
+        "ok": True,
+        "project_name": context["project_name"],
+        "files": preview["files"],
+        "has_existing_files": preview["has_existing_files"],
+        "output": _format_multi_file_preview(preview["files"]),
+    }
+
+
+def build_project_repair_files_preview(project_name, prompt, validation_output, workspace_dir="workspace"):
+    prompt = prompt.strip()
+    validation_output = validation_output.strip()
+
+    if not prompt:
+        return {
+            "ok": False,
+            "error": "Please provide the original project-aware prompt.",
+            "output": "Please provide the original project-aware prompt.",
+        }
+
+    if not validation_output:
+        return {
+            "ok": False,
+            "error": "Please provide validation output to repair.",
+            "output": "Please provide validation output to repair.",
+        }
+
+    context = build_project_context(project_name, workspace_dir)
+
+    if not context["ok"]:
+        return context
+
+    generated_output = generate_project_repair_files(
+        prompt,
+        context["context"],
+        validation_output,
+    )
+
+    preview = _build_project_preview_from_generated_output(
+        project_name,
+        generated_output,
+        workspace_dir,
+    )
+
+    if not preview["ok"]:
+        return preview
+
+    preview["output"] = (
+        "PROJECT REPAIR PREVIEW\n\n"
+        + preview["output"]
+    )
+    return preview
+
+
 def preview_generated_code(file_path, prompt, workspace_dir="workspace"):
     return build_generated_code_preview(file_path, prompt, workspace_dir)["output"]
 
@@ -541,6 +697,15 @@ def preview_generated_code_files(prompt, workspace_dir="workspace"):
 
 def preview_project_code_files(project_name, prompt, workspace_dir="workspace"):
     return build_project_code_files_preview(project_name, prompt, workspace_dir)["output"]
+
+
+def preview_project_repair_files(project_name, prompt, validation_output, workspace_dir="workspace"):
+    return build_project_repair_files_preview(
+        project_name,
+        prompt,
+        validation_output,
+        workspace_dir,
+    )["output"]
 
 
 def save_code_content(file_path, code, workspace_dir="workspace"):

@@ -266,6 +266,57 @@ def helper():
     assert "workspace/demo_app/backend/utils.py" in output
 
 
+def test_build_project_repair_files_preview_uses_validation_output(monkeypatch, tmp_path):
+    project_path = tmp_path / "demo_app"
+    app_file = project_path / "backend" / "app.py"
+    app_file.parent.mkdir(parents=True)
+    app_file.write_text("print('broken')\n", encoding="utf-8")
+    prompts = []
+
+    def fake_generate_project_repair_files(prompt, project_context, validation_output):
+        prompts.append((prompt, project_context, validation_output))
+        return """file: backend/app.py
+print("fixed")
+"""
+
+    monkeypatch.setattr(
+        agent_codegen,
+        "generate_project_repair_files",
+        fake_generate_project_repair_files,
+    )
+
+    preview = agent_codegen.build_project_repair_files_preview(
+        "demo_app",
+        "add a route",
+        "FAIL: backend import failed",
+        workspace_dir=str(tmp_path),
+    )
+
+    assert preview["ok"] is True
+    assert preview["files"][0]["relative_path"].replace("\\", "/") == "demo_app/backend/app.py"
+    assert preview["has_existing_files"] is True
+    assert preview["output"].startswith("PROJECT REPAIR PREVIEW")
+    assert "DIFF:" in preview["output"]
+    assert "add a route" in prompts[0][0]
+    assert "backend/app.py" in prompts[0][1]
+    assert "FAIL: backend import failed" in prompts[0][2]
+
+
+def test_build_project_repair_files_preview_requires_validation_output(tmp_path):
+    project_path = tmp_path / "demo_app"
+    project_path.mkdir()
+
+    preview = agent_codegen.build_project_repair_files_preview(
+        "demo_app",
+        "add a route",
+        "",
+        workspace_dir=str(tmp_path),
+    )
+
+    assert preview["ok"] is False
+    assert preview["output"] == "Please provide validation output to repair."
+
+
 def test_save_generated_code_writes_under_workspace(monkeypatch, tmp_path):
     def fake_generate_code(prompt):
         return "def add_numbers(a, b):\n    return a + b"
