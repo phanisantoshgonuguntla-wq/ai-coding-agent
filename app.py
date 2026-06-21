@@ -198,6 +198,9 @@ elif mode == "Generate code":
 
         if project_aware:
             project_name = st.selectbox("Project", projects)
+            validate_after_save = st.checkbox("Validate after save")
+        else:
+            validate_after_save = False
 
         preview_state_key = (
             "project_code_files_preview"
@@ -264,10 +267,26 @@ elif mode == "Generate code":
                         preview["files"],
                     )
                     if project_aware:
-                        direct_output += (
-                            "\n\nNEXT CHECK:\n"
-                            f"validate app {project_name}"
-                        )
+                        if validate_after_save:
+                            with st.spinner("Validating saved project..."):
+                                try:
+                                    validation_output = run_agent(
+                                        f"validate app {project_name}"
+                                    )
+                                except Exception as error:
+                                    validation_output = str(error)
+
+                            direct_output += (
+                                "\n\n====================\n"
+                                "VALIDATION RESULT\n"
+                                "====================\n"
+                                f"{validation_output}"
+                            )
+                        else:
+                            direct_output += (
+                                "\n\nNEXT CHECK:\n"
+                                f"validate app {project_name}"
+                            )
     elif save_to_file:
         saved_preview = st.session_state.get("generated_code_preview")
         preview_matches_input = (
