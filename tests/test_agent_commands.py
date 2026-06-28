@@ -27,6 +27,10 @@ def make_context():
         "cleanup_runtime": lambda project: f"cleanup:{project}",
         "validation_center": lambda project: f"validation-center:{project}",
         "repair_guidance": lambda project: f"repair-guidance:{project}",
+        "dependency_report": lambda project: f"dependency:{project}",
+        "project_memory": lambda project: f"memory:{project}",
+        "remember_project": lambda project, note: f"remember:{project}:{note}",
+        "agent_health": lambda: "agent-health",
         "create_app_workflow": lambda text: f"create:{text}",
     }
 
@@ -136,6 +140,13 @@ def test_main_agent_upgrade_commands_route_to_handlers():
     assert agent_commands.run_agent("cleanup runtime demo_app", make_context()) == "cleanup:demo_app"
     assert agent_commands.run_agent("validation center demo_app", make_context()) == "validation-center:demo_app"
     assert agent_commands.run_agent("repair guidance demo_app", make_context()) == "repair-guidance:demo_app"
+    assert agent_commands.run_agent("dependency report demo_app", make_context()) == "dependency:demo_app"
+    assert agent_commands.run_agent("project memory demo_app", make_context()) == "memory:demo_app"
+    assert agent_commands.run_agent(
+        "remember project demo_app backend uses Flask",
+        make_context(),
+    ) == "remember:demo_app:backend uses Flask"
+    assert agent_commands.run_agent("agent health", make_context()) == "agent-health"
 
 
 def test_generate_code_file_validates_required_arguments():

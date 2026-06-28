@@ -74,6 +74,10 @@ from tools import (
     run_frontend_build,
     format_runtime_health_report,
     cleanup_stale_runtime_state,
+    format_agent_environment_health,
+    format_project_dependency_report,
+    get_project_memory,
+    remember_project_note,
 )
 
 WORKSPACE_DIR = "workspace"
@@ -165,6 +169,18 @@ AI Coding Agent commands:
 
 - cleanup runtime <project_name>
   Clear stale runtime state when project ports are not active.
+
+- dependency report <project_name>
+  Show required tools, dependency files, declared packages, and install status.
+
+- project memory <project_name>
+  Show saved notes for a generated project.
+
+- remember project <project_name> <note>
+  Save a short project note for future reference.
+
+- agent health
+  Show local tool, workspace, and runtime-state health.
 
 - supported stacks
   List app stacks this builder can generate.
@@ -1708,6 +1724,22 @@ def runtime_health(project_name):
 
 def cleanup_runtime(project_name):
     return cleanup_stale_runtime_state(project_name)
+
+
+def dependency_report(project_name):
+    return format_project_dependency_report(project_name)
+
+
+def agent_health():
+    return format_agent_environment_health()
+
+
+def project_memory(project_name):
+    return get_project_memory(project_name)
+
+
+def remember_project(project_name, note):
+    return remember_project_note(project_name, note)
 
 
 def validation_center(project_name):

@@ -394,6 +394,301 @@ Cleared stale runtime state.
 """
 
 
+def _run_version_command(command, timeout=10):
+    executable = command[0] if os.path.exists(command[0]) else shutil.which(command[0])
+
+    if not executable:
+        return {
+            "available": False,
+            "path": None,
+            "version": "",
+        }
+
+    try:
+        result = subprocess.run(
+            [executable, *command[1:]],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        version = (result.stdout or result.stderr or "").strip().splitlines()
+
+        return {
+            "available": result.returncode == 0,
+            "path": executable,
+            "version": version[0] if version else "",
+        }
+    except Exception as e:
+        return {
+            "available": False,
+            "path": executable,
+            "version": str(e),
+        }
+
+
+def get_agent_environment_health():
+    commands = {
+        "python": [sys.executable, "--version"],
+        "git": ["git", "--version"],
+        "node": ["node", "--version"],
+        "npm": ["npm", "--version"],
+        "dotnet": ["dotnet", "--version"],
+        "php": ["php", "--version"],
+        "ollama": ["ollama", "--version"],
+    }
+    tools_status = {
+        name: _run_version_command(command)
+        for name, command in commands.items()
+    }
+    projects = list_workspace_projects()
+    runtime_state = read_runtime_state()
+
+    return {
+        "workspace_dir": WORKSPACE_DIR,
+        "project_count": len(projects),
+        "projects": projects,
+        "runtime_state_count": len(runtime_state),
+        "runtime_projects": sorted(runtime_state.keys()),
+        "tools": tools_status,
+    }
+
+
+def format_agent_environment_health():
+    health = get_agent_environment_health()
+    tool_lines = []
+
+    for name, status in health["tools"].items():
+        state = "available" if status["available"] else "missing"
+        detail = status["version"] or status["path"] or "not found on PATH"
+        tool_lines.append(f"{name}: {state} - {detail}")
+
+    return f"""AGENT HEALTH REPORT
+
+WORKSPACE:
+{health["workspace_dir"]}
+
+PROJECTS:
+{health["project_count"]} project(s): {", ".join(health["projects"]) or "none"}
+
+RUNTIME STATE:
+{health["runtime_state_count"]} active record(s): {", ".join(health["runtime_projects"]) or "none"}
+
+TOOLS:
+{chr(10).join(tool_lines)}
+
+NEXT ACTION:
+Run dependency report <project_name> before starting or validating a generated app.
+"""
+
+
+def _read_text_file(path):
+    if not os.path.exists(path):
+        return ""
+
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            return f.read()
+    except Exception:
+        return ""
+
+
+def _read_json_file(path):
+    if not os.path.exists(path):
+        return None
+
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def get_project_dependency_report(project_name):
+    project_path = os.path.join(WORKSPACE_DIR, project_name)
+
+    if not os.path.exists(project_path):
+        return {
+            "exists": False,
+            "project_name": project_name,
+            "error": f"Project not found: {project_name}",
+        }
+
+    config = get_project_config(project_name)
+    stack_key = config.get("stack_key", get_project_stack_key(project_name))
+    backend_path = os.path.join(project_path, "backend")
+    frontend_path = os.path.join(project_path, "frontend")
+    requirements_path = os.path.join(backend_path, "requirements.txt")
+    package_path = os.path.join(frontend_path, "package.json")
+    requirements = [
+        line.strip()
+        for line in _read_text_file(requirements_path).splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    package_data = _read_json_file(package_path) or {}
+    frontend_dependencies = sorted({
+        *package_data.get("dependencies", {}).keys(),
+        *package_data.get("devDependencies", {}).keys(),
+    })
+    scripts = sorted(package_data.get("scripts", {}).keys())
+    tool_checks = {
+        "python": bool(sys.executable),
+        "npm": bool(get_npm_executable()),
+        "node": bool(shutil.which("node")),
+        "git": bool(shutil.which("git")),
+        "dotnet": bool(find_dotnet_executable()),
+        "php": bool(shutil.which("php")),
+    }
+    expected_tools = ["python", "npm", "node", "git"]
+
+    if stack_key == "react_dotnet_sqlite":
+        expected_tools.append("dotnet")
+
+    if stack_key == "react_php_sqlite":
+        expected_tools.append("php")
+
+    missing_tools = [
+        tool_name
+        for tool_name in expected_tools
+        if not tool_checks.get(tool_name)
+    ]
+    missing_files = [
+        relative_path
+        for relative_path in get_required_files_for_stack(stack_key)
+        if not os.path.exists(os.path.join(project_path, relative_path))
+    ]
+
+    return {
+        "exists": True,
+        "project_name": project_name,
+        "stack_key": stack_key,
+        "missing_tools": missing_tools,
+        "missing_required_files": missing_files,
+        "requirements_exists": os.path.exists(requirements_path),
+        "requirements": requirements,
+        "package_exists": os.path.exists(package_path),
+        "frontend_dependencies": frontend_dependencies,
+        "frontend_scripts": scripts,
+        "node_modules_exists": os.path.exists(os.path.join(frontend_path, "node_modules")),
+        "backend_path_exists": os.path.exists(backend_path),
+        "frontend_path_exists": os.path.exists(frontend_path),
+    }
+
+
+def format_project_dependency_report(project_name):
+    report = get_project_dependency_report(project_name)
+
+    if not report.get("exists"):
+        return report.get("error", f"Project not found: {project_name}")
+
+    missing_files = report["missing_required_files"] or ["None"]
+    missing_tools = report["missing_tools"] or ["None"]
+    requirements = report["requirements"] or ["None"]
+    dependencies = report["frontend_dependencies"] or ["None"]
+    scripts = report["frontend_scripts"] or ["None"]
+
+    return f"""DEPENDENCY REPORT
+
+PROJECT:
+{project_name}
+
+STACK:
+{report["stack_key"]}
+
+MISSING TOOLS:
+{chr(10).join(missing_tools)}
+
+MISSING REQUIRED FILES:
+{chr(10).join(missing_files)}
+
+BACKEND:
+folder exists: {"yes" if report["backend_path_exists"] else "no"}
+requirements.txt: {"yes" if report["requirements_exists"] else "no"}
+declared packages:
+{chr(10).join(requirements)}
+
+FRONTEND:
+folder exists: {"yes" if report["frontend_path_exists"] else "no"}
+package.json: {"yes" if report["package_exists"] else "no"}
+node_modules: {"yes" if report["node_modules_exists"] else "no"}
+scripts: {", ".join(scripts)}
+declared packages:
+{chr(10).join(dependencies)}
+
+NEXT ACTION:
+{"Install missing tools first." if report["missing_tools"] else "run fullstack " + project_name}
+"""
+
+
+def get_project_memory_path(project_name):
+    memory_dir = os.path.join(WORKSPACE_DIR, "_memory")
+    os.makedirs(memory_dir, exist_ok=True)
+    safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", project_name)
+    return os.path.join(memory_dir, f"{safe_name}.md")
+
+
+def remember_project_note(project_name, note):
+    project_path = os.path.join(WORKSPACE_DIR, project_name)
+
+    if not os.path.exists(project_path):
+        return f"Project not found: {project_name}"
+
+    note = note.strip()
+
+    if not note:
+        return "Use format: remember project <project_name> <note>"
+
+    memory_path = get_project_memory_path(project_name)
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    with open(memory_path, "a", encoding="utf-8") as f:
+        f.write(f"- [{timestamp}] {note}\n")
+
+    log_project_activity(project_name, "PROJECT_MEMORY_ADDED", note)
+
+    return f"""PROJECT MEMORY UPDATED
+
+PROJECT:
+{project_name}
+
+NOTE:
+{note}
+
+MEMORY FILE:
+{memory_path}
+"""
+
+
+def get_project_memory(project_name):
+    project_path = os.path.join(WORKSPACE_DIR, project_name)
+
+    if not os.path.exists(project_path):
+        return f"Project not found: {project_name}"
+
+    memory_path = get_project_memory_path(project_name)
+
+    if not os.path.exists(memory_path):
+        return f"""PROJECT MEMORY
+
+PROJECT:
+{project_name}
+
+NOTES:
+No project memory found yet.
+
+ADD A NOTE:
+remember project {project_name} <note>
+"""
+
+    return f"""PROJECT MEMORY
+
+PROJECT:
+{project_name}
+
+NOTES:
+{_read_text_file(memory_path).strip() or "No project memory found yet."}
+"""
+
+
 def taskkill_process_tree(pid):
     result = subprocess.run(
         ["taskkill", "/F", "/T", "/PID", str(pid)],

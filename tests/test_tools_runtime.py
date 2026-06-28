@@ -219,3 +219,86 @@ def test_runtime_cleanup_skips_when_ports_are_active(tmp_path, monkeypatch):
 
     assert "RUNTIME CLEANUP SKIPPED" in output
     assert "999" in output
+
+
+def test_dependency_report_lists_declared_project_dependencies(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(tools, "get_npm_executable", lambda: "npm")
+
+    project_path = tmp_path / "workspace" / "demo_app"
+    backend_path = project_path / "backend"
+    frontend_path = project_path / "frontend"
+    (frontend_path / "src").mkdir(parents=True)
+    backend_path.mkdir(parents=True)
+    (backend_path / "app.py").write_text("print('ok')", encoding="utf-8")
+    (backend_path / "routes.py").write_text("", encoding="utf-8")
+    (backend_path / "database.py").write_text("", encoding="utf-8")
+    (backend_path / "models.py").write_text("", encoding="utf-8")
+    (backend_path / "requirements.txt").write_text("flask\npandas\n", encoding="utf-8")
+    (frontend_path / "index.html").write_text("<div id='root'></div>", encoding="utf-8")
+    (frontend_path / "src" / "main.jsx").write_text("", encoding="utf-8")
+    (frontend_path / "src" / "App.jsx").write_text("", encoding="utf-8")
+    (frontend_path / "src" / "api.js").write_text("", encoding="utf-8")
+    (frontend_path / "src" / "style.css").write_text("", encoding="utf-8")
+    (frontend_path / "package.json").write_text(
+        json.dumps({
+            "scripts": {"dev": "vite", "build": "vite build"},
+            "dependencies": {"@vitejs/plugin-react": "latest", "vite": "latest"},
+        }),
+        encoding="utf-8",
+    )
+    (project_path / "project_config.json").write_text(
+        json.dumps({
+            "stack_key": "react_flask_sqlite",
+            "frontend_url": "http://127.0.0.1:5173",
+            "backend_url": "http://127.0.0.1:5000",
+            "frontend_port": 5173,
+            "backend_port": 5000,
+        }),
+        encoding="utf-8",
+    )
+
+    report = tools.get_project_dependency_report("demo_app")
+    output = tools.format_project_dependency_report("demo_app")
+
+    assert report["requirements"] == ["flask", "pandas"]
+    assert "vite" in report["frontend_dependencies"]
+    assert report["missing_required_files"] == []
+    assert "DEPENDENCY REPORT" in output
+    assert "pandas" in output
+    assert "run fullstack demo_app" in output
+
+
+def test_project_memory_records_and_reads_notes(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    project_path = tmp_path / "workspace" / "demo_app"
+    project_path.mkdir(parents=True)
+
+    empty_output = tools.get_project_memory("demo_app")
+    save_output = tools.remember_project_note("demo_app", "Backend uses Flask routes.")
+    memory_output = tools.get_project_memory("demo_app")
+
+    assert "No project memory found yet" in empty_output
+    assert "PROJECT MEMORY UPDATED" in save_output
+    assert "Backend uses Flask routes." in memory_output
+
+
+def test_agent_environment_health_reports_workspace_and_tools(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        tools,
+        "_run_version_command",
+        lambda command: {
+            "available": True,
+            "path": command[0],
+            "version": "version ok",
+        },
+    )
+
+    (tmp_path / "workspace" / "demo_app").mkdir(parents=True)
+    output = tools.format_agent_environment_health()
+
+    assert "AGENT HEALTH REPORT" in output
+    assert "1 project(s): demo_app" in output
+    assert "python: available - version ok" in output

@@ -645,6 +645,9 @@ elif mode == "Run or inspect a project":
             "repair guidance",
             "runtime health",
             "cleanup runtime",
+            "dependency report",
+            "project memory",
+            "agent health",
             "quality check",
             "preflight fullstack",
             "project history",
@@ -655,8 +658,8 @@ elif mode == "Run or inspect a project":
         ],
     )
 
-    if st.button("Run action", type="primary", disabled=not projects):
-        if action == "stop all apps":
+    if st.button("Run action", type="primary", disabled=not projects and action != "agent health"):
+        if action in ["stop all apps", "agent health"]:
             command = action
         else:
             command = f"{action} {project_name}"

@@ -108,6 +108,16 @@ def _restore_project(user_input, ctx):
     return "Use format: restore <project_name> [snapshot_name]"
 
 
+def _remember_project(user_input, ctx):
+    remainder = strip_command_prefix(user_input, "remember project")
+    parts = remainder.split(maxsplit=1)
+
+    if len(parts) != 2:
+        return "Use format: remember project <project_name> <note>"
+
+    return ctx["remember_project"](parts[0], parts[1])
+
+
 def _compare_snapshot(user_input, ctx):
     parts = user_input.split()
 
@@ -493,6 +503,26 @@ def build_command_registry(ctx):
             "repair_guidance",
             lambda text, lower: lower.startswith("repair guidance "),
             lambda text: ctx["repair_guidance"](strip_command_prefix(text, "repair guidance")),
+        ),
+        Command(
+            "dependency_report",
+            lambda text, lower: lower.startswith("dependency report "),
+            lambda text: ctx["dependency_report"](strip_command_prefix(text, "dependency report")),
+        ),
+        Command(
+            "project_memory",
+            lambda text, lower: lower.startswith("project memory "),
+            lambda text: ctx["project_memory"](strip_command_prefix(text, "project memory")),
+        ),
+        Command(
+            "remember_project",
+            lambda text, lower: lower.startswith("remember project "),
+            lambda text: _remember_project(text, ctx),
+        ),
+        Command(
+            "agent_health",
+            lambda text, lower: lower == "agent health",
+            lambda text: ctx["agent_health"](),
         ),
         Command(
             "make_standalone",

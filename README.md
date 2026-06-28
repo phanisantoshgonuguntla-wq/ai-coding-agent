@@ -74,6 +74,10 @@ validation center <project_name>
 repair guidance <project_name>
 runtime health <project_name>
 cleanup runtime <project_name>
+dependency report <project_name>
+project memory <project_name>
+remember project <project_name> <note>
+agent health
 refresh project ports <project_name>
 refresh project spec <project_name>
 stop fullstack <project_name>
