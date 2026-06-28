@@ -187,6 +187,30 @@ elif mode == "Modify an existing app":
         command = f"modify app {project_name} {change_request.strip()}"
 
 elif mode == "Generate code":
+    with st.expander("Codegen history", expanded=False):
+        sessions = agent.get_codegen_session_records()
+
+        if not sessions:
+            st.caption("No codegen sessions found.")
+        else:
+            session_options = {
+                (
+                    f"{session.get('created_at')} | "
+                    f"{session.get('project_name')} | "
+                    f"{session.get('validation_status')} | "
+                    f"{session.get('id')}"
+                ): session
+                for session in sessions
+            }
+            selected_session_label = st.selectbox(
+                "Session",
+                list(session_options.keys()),
+            )
+            selected_session = session_options[selected_session_label]
+            st.write(f"Checkpoint: {selected_session.get('checkpoint_id') or 'None'}")
+            st.write(f"Files: {len(selected_session.get('files', []))}")
+            st.code(agent.show_codegen_session(selected_session["id"]))
+
     preset_label = st.selectbox(
         "Prompt preset",
         ["Custom prompt"] + list(CODEGEN_PROMPT_PRESETS.keys()),
@@ -270,6 +294,11 @@ elif mode == "Generate code":
                     direct_output = agent.save_code_files_content(
                         repair_preview["files"],
                     )
+                    checkpoint_id = agent.extract_codegen_checkpoint_id(direct_output)
+                    git_summary = agent.build_codegen_git_summary(
+                        repair_preview["files"],
+                        effective_code_prompt,
+                    )
                     validation_output = ""
 
                     if validate_after_save:
@@ -294,6 +323,11 @@ elif mode == "Generate code":
                             f"validate app {project_name}"
                         )
 
+                    direct_output += (
+                        "\n\n====================\n"
+                        f"{git_summary}"
+                    )
+
                     session = agent.record_codegen_session(
                         "repair",
                         project_name,
@@ -301,6 +335,9 @@ elif mode == "Generate code":
                         repair_preview["files"],
                         validation_output,
                         repair_preview.get("dependency_warnings", []),
+                        checkpoint_id,
+                        git_summary,
+                        repair_preview.get("implementation_plan", ""),
                     )
                     direct_output += (
                         "\n\nCODEGEN SESSION:\n"
@@ -340,6 +377,7 @@ elif mode == "Generate code":
                         "files": preview["files"],
                         "has_existing_files": preview["has_existing_files"],
                         "dependency_warnings": preview.get("dependency_warnings", []),
+                        "implementation_plan": preview.get("implementation_plan", ""),
                         "output": preview["output"],
                     }
                 else:
@@ -364,6 +402,11 @@ elif mode == "Generate code":
                 else:
                     direct_output = agent.save_code_files_content(
                         preview["files"],
+                    )
+                    checkpoint_id = agent.extract_codegen_checkpoint_id(direct_output)
+                    git_summary = agent.build_codegen_git_summary(
+                        preview["files"],
+                        effective_code_prompt,
                     )
                     validation_output = ""
 
@@ -403,6 +446,7 @@ elif mode == "Generate code":
                                         "files": repair_preview["files"],
                                         "has_existing_files": repair_preview["has_existing_files"],
                                         "dependency_warnings": repair_preview.get("dependency_warnings", []),
+                                        "implementation_plan": repair_preview.get("implementation_plan", ""),
                                         "output": repair_preview["output"],
                                     }
                                 else:
@@ -420,6 +464,11 @@ elif mode == "Generate code":
                                 f"validate app {project_name}"
                             )
 
+                        direct_output += (
+                            "\n\n====================\n"
+                            f"{git_summary}"
+                        )
+
                         session = agent.record_codegen_session(
                             "project_save",
                             project_name,
@@ -427,10 +476,22 @@ elif mode == "Generate code":
                             preview["files"],
                             validation_output,
                             preview.get("dependency_warnings", []),
+                            checkpoint_id,
+                            git_summary,
+                            preview.get("implementation_plan", ""),
                         )
                         direct_output += (
                             "\n\nCODEGEN SESSION:\n"
                             f"{session['id']}"
+                        )
+                    else:
+                        git_summary = agent.build_codegen_git_summary(
+                            preview["files"],
+                            effective_code_prompt,
+                        )
+                        direct_output += (
+                            "\n\n====================\n"
+                            f"{git_summary}"
                         )
     elif save_to_file:
         saved_preview = st.session_state.get("generated_code_preview")
@@ -489,6 +550,18 @@ elif mode == "Generate code":
                     direct_output = agent.save_code_content(
                         save_path.strip(),
                         preview["code"],
+                    )
+                    git_summary = agent.build_codegen_git_summary(
+                        [
+                            {
+                                "display_path": save_path.strip().replace("\\", "/"),
+                            }
+                        ],
+                        effective_code_prompt,
+                    )
+                    direct_output += (
+                        "\n\n====================\n"
+                        f"{git_summary}"
                     )
     else:
         if st.button("Generate code", type="primary"):

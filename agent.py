@@ -1819,6 +1819,9 @@ def record_codegen_session(
     files,
     validation_output="",
     dependency_warnings=None,
+    checkpoint_id="",
+    git_summary="",
+    implementation_plan="",
 ):
     return agent_codegen.record_codegen_session(
         session_type,
@@ -1827,12 +1830,19 @@ def record_codegen_session(
         files,
         validation_output,
         dependency_warnings,
+        checkpoint_id,
+        git_summary,
+        implementation_plan,
         WORKSPACE_DIR,
     )
 
 
 def list_codegen_sessions():
     return agent_codegen.list_codegen_sessions(WORKSPACE_DIR)
+
+
+def get_codegen_session_records(limit=20):
+    return agent_codegen.get_codegen_session_records(WORKSPACE_DIR, limit)
 
 
 def show_codegen_session(session_id):
@@ -1868,6 +1878,14 @@ def validate_codegen_changes(project_name, files):
         stack_key,
         validators,
     )
+
+
+def extract_codegen_checkpoint_id(output):
+    return agent_codegen.extract_codegen_checkpoint_id(output)
+
+
+def build_codegen_git_summary(files, prompt):
+    return agent_codegen.build_codegen_git_summary(files, prompt)
 
 
 def run_agent(user_input):

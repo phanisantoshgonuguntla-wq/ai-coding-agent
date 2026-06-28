@@ -1,6 +1,7 @@
 import agent_codegen
 import json
 import re
+from types import SimpleNamespace
 
 
 def test_generate_code_requires_prompt():
@@ -200,6 +201,48 @@ export default function App() {
     assert "add a customers heading" in prompts[0][0]
     assert "React + Flask + SQLite" in prompts[0][1]
     assert "frontend/src/App.jsx" in prompts[0][1]
+
+
+def test_complex_project_preview_includes_implementation_plan(monkeypatch, tmp_path):
+    project_path = tmp_path / "demo_app"
+    app_file = project_path / "frontend" / "src" / "App.jsx"
+    app_file.parent.mkdir(parents=True)
+    app_file.write_text("export default function App() { return null; }\n", encoding="utf-8")
+    (project_path / "project_spec.json").write_text(
+        json.dumps({"app_type": "React + Flask + SQLite"}),
+        encoding="utf-8",
+    )
+    generated_prompts = []
+
+    def fake_invoke_llm(prompt):
+        assert "Create a concise implementation plan" in prompt
+        return "1. Update backend route\n2. Update frontend UI\n3. Validate build"
+
+    def fake_generate_project_code_files(prompt, project_context):
+        generated_prompts.append(prompt)
+        return """file: frontend/src/App.jsx
+export default function App() {
+    return <h1>Search</h1>;
+}
+"""
+
+    monkeypatch.setattr(agent_codegen, "invoke_llm", fake_invoke_llm)
+    monkeypatch.setattr(
+        agent_codegen,
+        "generate_project_code_files",
+        fake_generate_project_code_files,
+    )
+
+    preview = agent_codegen.build_project_code_files_preview(
+        "demo_app",
+        "Add API route and frontend search filter with validation for the customer dashboard",
+        workspace_dir=str(tmp_path),
+    )
+
+    assert preview["ok"] is True
+    assert "Update backend route" in preview["implementation_plan"]
+    assert "IMPLEMENTATION PLAN:" in preview["output"]
+    assert "Use this implementation plan" in generated_prompts[0]
 
 
 def test_select_project_context_files_chooses_frontend_files():
@@ -454,6 +497,9 @@ def test_record_and_show_codegen_session(tmp_path):
         [{"display_path": "demo_app/frontend/src/App.jsx"}],
         "APP VALIDATION REPORT\nFINAL STATUS:\nREADY",
         ["demo_app/frontend/src/App.jsx: JS package 'axios' is not declared in frontend/package.json"],
+        "checkpoint_123",
+        "GIT CHANGE SUMMARY\nSUGGESTED COMMIT:\nUpdate add export",
+        "1. Update files",
         workspace_dir=str(tmp_path),
     )
 
@@ -468,6 +514,11 @@ def test_record_and_show_codegen_session(tmp_path):
     assert "passed" in output
     assert "add export" in output
     assert "axios" in output
+    assert "checkpoint_123" in output
+    assert "Update add export" in output
+    assert "Update files" in output
+    records = agent_codegen.get_codegen_session_records(workspace_dir=str(tmp_path))
+    assert records[0]["checkpoint_id"] == "checkpoint_123"
 
 
 def test_save_code_files_content_creates_restorable_checkpoint(tmp_path):
@@ -602,6 +653,26 @@ def test_validate_codegen_changes_marks_failure():
 
     assert "FINAL STATUS:\nNEEDS ATTENTION" in output
     assert "FAIL: route missing" in output
+
+
+def test_build_codegen_git_summary_uses_git_status(monkeypatch):
+    def fake_run(command, cwd, capture_output, text, timeout):
+        assert command == ["git", "status", "--short"]
+        assert cwd == "."
+        return SimpleNamespace(returncode=0, stdout=" M app.py\n", stderr="")
+
+    monkeypatch.setattr(agent_codegen.subprocess, "run", fake_run)
+
+    output = agent_codegen.build_codegen_git_summary(
+        [{"display_path": "demo_app/frontend/src/App.jsx"}],
+        "Add export button",
+    )
+
+    assert "GIT CHANGE SUMMARY" in output
+    assert "SUGGESTED COMMIT:" in output
+    assert "Update add export button" in output
+    assert "demo_app/frontend/src/App.jsx" in output
+    assert "M app.py" in output
 
 
 def test_list_codegen_sessions_orders_recent_first(tmp_path, monkeypatch):

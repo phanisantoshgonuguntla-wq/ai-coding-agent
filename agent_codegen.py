@@ -2,6 +2,7 @@ import difflib
 import json
 import os
 import re
+import subprocess
 import uuid
 from datetime import datetime
 
@@ -192,6 +193,62 @@ Rules:
         return clean_code_output(invoke_llm(generation_prompt))
     except RuntimeError as error:
         return str(error)
+
+
+def is_complex_codegen_prompt(prompt):
+    prompt = prompt.strip().lower()
+
+    if len(prompt.split()) >= 22:
+        return True
+
+    complex_markers = [
+        "end to end",
+        "full flow",
+        "database",
+        "schema",
+        "api",
+        "backend",
+        "frontend",
+        "validation",
+        "export",
+        "search",
+        "filter",
+        "authentication",
+        "dashboard",
+        "multiple",
+    ]
+    marker_count = sum(1 for marker in complex_markers if marker in prompt)
+
+    return marker_count >= 2 or " and " in prompt and marker_count >= 1
+
+
+def generate_codegen_plan(prompt, project_context=""):
+    prompt = prompt.strip()
+
+    if not prompt:
+        return ""
+
+    planning_prompt = f"""
+Create a concise implementation plan for this code generation request.
+
+Project context:
+{project_context or "No project context provided."}
+
+User request:
+{prompt}
+
+Return:
+1. Files to change
+2. Implementation steps
+3. Validation checks
+
+Keep it practical and concise.
+"""
+
+    try:
+        return invoke_llm(planning_prompt).strip()
+    except RuntimeError as error:
+        return f"Planning unavailable: {error}"
 
 
 def _normalize_workspace_path(file_path, workspace_dir):
@@ -864,7 +921,25 @@ def _format_dependency_warning_section(dependency_warnings):
     ]
 
 
-def _format_project_multi_file_preview(entries, context_files, dependency_warnings=None):
+def _format_implementation_plan_section(implementation_plan):
+    if not implementation_plan:
+        return []
+
+    return [
+        "IMPLEMENTATION PLAN:",
+        implementation_plan,
+        "",
+        "====================",
+        "",
+    ]
+
+
+def _format_project_multi_file_preview(
+    entries,
+    context_files,
+    dependency_warnings=None,
+    implementation_plan="",
+):
     context_section = [
         "PROJECT CONTEXT FILES:",
         *(context_files or ["None"]),
@@ -872,9 +947,11 @@ def _format_project_multi_file_preview(entries, context_files, dependency_warnin
         "====================",
         "",
     ]
+    plan_section = _format_implementation_plan_section(implementation_plan)
     dependency_section = _format_dependency_warning_section(dependency_warnings or [])
     return (
         "\n".join(context_section)
+        + "\n".join(plan_section)
         + "\n".join(dependency_section)
         + _format_multi_file_preview(entries)
     )
@@ -973,7 +1050,16 @@ def build_project_code_files_preview(project_name, prompt, workspace_dir="worksp
     if not context["ok"]:
         return context
 
-    generated_output = generate_project_code_files(prompt, context["context"])
+    implementation_plan = ""
+    generation_prompt = prompt
+
+    if is_complex_codegen_prompt(prompt):
+        implementation_plan = generate_codegen_plan(prompt, context["context"])
+        generation_prompt = (
+            f"{prompt}\n\nUse this implementation plan:\n{implementation_plan}"
+        )
+
+    generated_output = generate_project_code_files(generation_prompt, context["context"])
 
     if _looks_like_generation_error(generated_output):
         return {
@@ -1031,6 +1117,7 @@ def build_project_code_files_preview(project_name, prompt, workspace_dir="worksp
         "ok": True,
         "project_name": context["project_name"],
         "context_files": context["context_files"],
+        "implementation_plan": implementation_plan,
         "dependency_warnings": dependency_warnings,
         "files": preview["files"],
         "has_existing_files": preview["has_existing_files"],
@@ -1038,6 +1125,7 @@ def build_project_code_files_preview(project_name, prompt, workspace_dir="worksp
             preview["files"],
             context["context_files"],
             dependency_warnings,
+            implementation_plan,
         ),
     }
 
@@ -1337,6 +1425,85 @@ FILES:
 """
 
 
+def extract_codegen_checkpoint_id(output):
+    match = re.search(r"checkpoint_[A-Za-z0-9_]+", output or "")
+
+    if not match:
+        return ""
+
+    return match.group(0)
+
+
+def _summarize_prompt_for_commit(prompt):
+    words = re.findall(r"[A-Za-z0-9]+", prompt.lower())
+    stop_words = {
+        "a",
+        "an",
+        "and",
+        "the",
+        "to",
+        "for",
+        "with",
+        "in",
+        "on",
+        "of",
+        "this",
+        "that",
+    }
+    useful_words = [
+        word
+        for word in words
+        if word not in stop_words
+    ][:7]
+
+    if not useful_words:
+        return "Update generated code"
+
+    return "Update " + " ".join(useful_words)
+
+
+def build_codegen_git_summary(files, prompt, repo_dir="."):
+    changed_files = [
+        file.get("display_path")
+        or file.get("relative_path", "").replace("\\", "/")
+        or file.get("path", "").replace("\\", "/")
+        for file in files
+    ]
+    changed_files = [
+        path
+        for path in changed_files
+        if path
+    ]
+    suggested_commit = _summarize_prompt_for_commit(prompt)
+
+    try:
+        result = subprocess.run(
+            ["git", "status", "--short"],
+            cwd=repo_dir,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        git_status = result.stdout.strip() or "No git status changes reported."
+
+        if result.returncode != 0:
+            git_status = (result.stderr or result.stdout or "git status failed.").strip()
+    except Exception as error:
+        git_status = f"git status unavailable: {error}"
+
+    return f"""GIT CHANGE SUMMARY
+
+SUGGESTED COMMIT:
+{suggested_commit}
+
+PREVIEWED FILES:
+{chr(10).join(changed_files) or "None"}
+
+GIT STATUS:
+{git_status}
+"""
+
+
 def _get_codegen_sessions_dir(workspace_dir):
     return os.path.join(workspace_dir, CODEGEN_SESSIONS_DIR)
 
@@ -1366,6 +1533,9 @@ def record_codegen_session(
     files,
     validation_output="",
     dependency_warnings=None,
+    checkpoint_id="",
+    git_summary="",
+    implementation_plan="",
     workspace_dir="workspace",
 ):
     sessions_dir = _get_codegen_sessions_dir(workspace_dir)
@@ -1390,6 +1560,9 @@ def record_codegen_session(
         "prompt": prompt,
         "files": file_paths,
         "dependency_warnings": dependency_warnings or [],
+        "checkpoint_id": checkpoint_id,
+        "git_summary": git_summary,
+        "implementation_plan": implementation_plan,
         "validation_status": _validation_status(validation_output),
         "validation_output": validation_output,
         "created_at": timestamp,
@@ -1442,6 +1615,27 @@ def list_codegen_sessions(workspace_dir="workspace", limit=20):
     return "\n".join(lines)
 
 
+def get_codegen_session_records(workspace_dir="workspace", limit=20):
+    sessions_dir = _get_codegen_sessions_dir(workspace_dir)
+
+    if not os.path.exists(sessions_dir):
+        return []
+
+    sessions = []
+
+    for file_name in os.listdir(sessions_dir):
+        if not file_name.endswith(".json"):
+            continue
+
+        session = _read_codegen_session_file(os.path.join(sessions_dir, file_name))
+
+        if session:
+            sessions.append(session)
+
+    sessions.sort(key=lambda item: item.get("created_at", ""), reverse=True)
+    return sessions[:limit]
+
+
 def show_codegen_session(session_id, workspace_dir="workspace"):
     session_id = session_id.strip()
 
@@ -1476,8 +1670,14 @@ CREATED:
 VALIDATION:
 {session.get("validation_status")}
 
+CHECKPOINT:
+{session.get("checkpoint_id") or "None"}
+
 DEPENDENCY WARNINGS:
 {chr(10).join(session.get("dependency_warnings", [])) or "None"}
+
+IMPLEMENTATION PLAN:
+{session.get("implementation_plan") or "None"}
 
 FILES:
 {chr(10).join(session.get("files", [])) or "None"}
@@ -1487,6 +1687,9 @@ PROMPT:
 
 VALIDATION OUTPUT:
 {session.get("validation_output", "") or "Not run"}
+
+GIT SUMMARY:
+{session.get("git_summary", "") or "Not captured"}
 """
 
 
