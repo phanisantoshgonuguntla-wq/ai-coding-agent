@@ -63,21 +63,42 @@ def render_project_dashboard(project_name):
 
     st.subheader("Project dashboard")
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     col1.metric("Stack", dashboard["stack_key"])
     col2.metric("Frontend", status_text(dashboard["frontend_running"]))
     col3.metric("Backend", status_text(dashboard["backend_running"]))
+    col4.metric("Validation", dashboard.get("latest_validation_status", "not_run"))
 
     col4, col5 = st.columns(2)
     col4.markdown(f"**Frontend URL:** [{dashboard['frontend_url']}]({dashboard['frontend_url']})")
     col5.markdown(f"**Backend URL:** [{dashboard['backend_url']}]({dashboard['backend_url']})")
 
-    col6, col7, col8 = st.columns(3)
+    col6, col7, col8, col9 = st.columns(4)
     col6.metric("Frontend port", dashboard["frontend_port"])
     col7.metric("Backend port", dashboard["backend_port"])
     col8.metric("Database", "Exists" if dashboard["database_exists"] else "Not found")
+    col9.metric("Files", dashboard.get("file_summary", {}).get("total_files", 0))
 
     st.caption(f"Project path: {dashboard['project_path']}")
+
+    file_summary = dashboard.get("file_summary", {})
+    st.caption(
+        "Files: "
+        f"backend {file_summary.get('backend_files', 0)}, "
+        f"frontend {file_summary.get('frontend_files', 0)}"
+    )
+
+    missing_required_files = dashboard.get("missing_required_files", [])
+
+    if missing_required_files:
+        st.warning(
+            "Missing required files: "
+            + ", ".join(missing_required_files)
+        )
+    else:
+        st.success(
+            f"Required files present: {dashboard.get('required_files_total', 0)} checked"
+        )
 
     if dashboard.get("runtime_started_at"):
         st.caption(
@@ -105,6 +126,42 @@ def render_project_dashboard(project_name):
         st.caption(f"Latest snapshot: {dashboard['latest_snapshot']}")
     else:
         st.caption("Latest snapshot: none")
+
+    latest_session = dashboard.get("latest_codegen_session")
+
+    if latest_session:
+        with st.expander("Latest codegen session"):
+            st.write(f"ID: {latest_session.get('id')}")
+            st.write(f"Type: {latest_session.get('type')}")
+            st.write(f"Validation: {latest_session.get('validation_status')}")
+            st.write(f"Checkpoint: {latest_session.get('checkpoint_id') or 'None'}")
+            st.write(f"Created: {latest_session.get('created_at')}")
+            st.code("\n".join(latest_session.get("files", [])) or "No files")
+    else:
+        st.caption("Latest codegen session: none")
+
+    latest_checkpoint = dashboard.get("latest_codegen_checkpoint")
+
+    if latest_checkpoint:
+        with st.expander("Latest codegen checkpoint"):
+            st.write(f"ID: {latest_checkpoint.get('id')}")
+            st.write(f"Reason: {latest_checkpoint.get('reason')}")
+            st.write(f"Created: {latest_checkpoint.get('created_at')}")
+            st.code(
+                "\n".join(
+                    file.get("display_path", "")
+                    for file in latest_checkpoint.get("files", [])
+                ) or "No files"
+            )
+    else:
+        st.caption("Latest codegen checkpoint: none")
+
+    if dashboard.get("latest_validation_output"):
+        with st.expander("Latest validation output"):
+            st.code(dashboard["latest_validation_output"])
+
+    with st.expander("Quick commands"):
+        st.code("\n".join(dashboard.get("quick_commands", [])))
 
     if dashboard["latest_history_entry"]:
         with st.expander("Latest history entry"):

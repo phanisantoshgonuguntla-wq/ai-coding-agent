@@ -90,3 +90,70 @@ def test_show_fullstack_logs_reports_persisted_log_paths(tmp_path, monkeypatch):
     assert "===== LOG FILES =====" in output
     assert "demo_app_backend.log" in output
     assert "demo_app_frontend.log" in output
+
+
+def test_project_dashboard_includes_recent_codegen_and_file_summary(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    project_path = tmp_path / "workspace" / "demo_app"
+    (project_path / "backend").mkdir(parents=True)
+    (project_path / "frontend" / "src").mkdir(parents=True)
+    (project_path / "backend" / "app.py").write_text("print('ok')", encoding="utf-8")
+    (project_path / "frontend" / "src" / "App.jsx").write_text("export default function App() {}", encoding="utf-8")
+    (project_path / "project_spec.json").write_text(
+        json.dumps({"stack_key": "react_flask_sqlite"}),
+        encoding="utf-8",
+    )
+    (project_path / "project_config.json").write_text(
+        json.dumps({
+            "stack_key": "react_flask_sqlite",
+            "frontend_url": "http://127.0.0.1:5173",
+            "backend_url": "http://127.0.0.1:5000",
+            "frontend_port": 5173,
+            "backend_port": 5000,
+        }),
+        encoding="utf-8",
+    )
+
+    sessions_dir = tmp_path / "workspace" / "_runtime" / "codegen_sessions"
+    checkpoints_dir = tmp_path / "workspace" / "_runtime" / "codegen_checkpoints"
+    sessions_dir.mkdir(parents=True)
+    checkpoints_dir.mkdir(parents=True)
+    (sessions_dir / "codegen_1.json").write_text(
+        json.dumps({
+            "id": "codegen_1",
+            "project_name": "demo_app",
+            "type": "project_save",
+            "validation_status": "passed",
+            "validation_output": "PASS: all good",
+            "checkpoint_id": "checkpoint_1",
+            "created_at": "2026-06-28T10:00:00",
+            "files": ["demo_app/frontend/src/App.jsx"],
+        }),
+        encoding="utf-8",
+    )
+    (checkpoints_dir / "checkpoint_1.json").write_text(
+        json.dumps({
+            "id": "checkpoint_1",
+            "reason": "multi_file_save",
+            "created_at": "2026-06-28T10:00:00",
+            "files": [
+                {
+                    "display_path": "demo_app/frontend/src/App.jsx",
+                    "relative_path": "demo_app/frontend/src/App.jsx",
+                }
+            ],
+        }),
+        encoding="utf-8",
+    )
+
+    dashboard = tools.get_project_dashboard("demo_app")
+
+    assert dashboard["exists"] is True
+    assert dashboard["file_summary"]["total_files"] >= 4
+    assert dashboard["file_summary"]["backend_files"] == 1
+    assert dashboard["file_summary"]["frontend_files"] == 1
+    assert dashboard["latest_codegen_session"]["id"] == "codegen_1"
+    assert dashboard["latest_codegen_checkpoint"]["id"] == "checkpoint_1"
+    assert dashboard["latest_validation_status"] == "passed"
+    assert "validate app demo_app" in dashboard["quick_commands"]

@@ -10,6 +10,8 @@ A local Streamlit app that uses Ollama to build, run, inspect, validate, and mod
 
 Generated projects live under `workspace/`. Each project can have its own ports, config, specs, validation checks, and run scripts.
 
+The Streamlit project dashboard shows stack, URLs, ports, runtime status, file counts, missing required files, latest validation, latest codegen session, latest checkpoint, logs, snapshots, and quick command suggestions.
+
 ## Local Setup
 
 1. Install Python 3.11+.

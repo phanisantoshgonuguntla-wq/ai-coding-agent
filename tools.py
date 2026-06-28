@@ -884,6 +884,109 @@ def get_latest_history_entry(project_name):
         return None
 
 
+def _read_json_file(file_path):
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _read_runtime_records(folder_name):
+    records_dir = os.path.join(RUNTIME_DIR, folder_name)
+
+    if not os.path.exists(records_dir):
+        return []
+
+    records = []
+
+    for file_name in os.listdir(records_dir):
+        if not file_name.endswith(".json"):
+            continue
+
+        record = _read_json_file(os.path.join(records_dir, file_name))
+
+        if record:
+            records.append(record)
+
+    records.sort(key=lambda item: item.get("created_at", ""), reverse=True)
+    return records
+
+
+def get_latest_codegen_session_for_project(project_name):
+    for session in _read_runtime_records("codegen_sessions"):
+        if session.get("project_name") == project_name:
+            return session
+
+    return None
+
+
+def get_latest_codegen_checkpoint_for_project(project_name):
+    project_prefix = f"{project_name}/"
+
+    for checkpoint in _read_runtime_records("codegen_checkpoints"):
+        for file in checkpoint.get("files", []):
+            file_path = (
+                file.get("display_path")
+                or file.get("relative_path", "")
+            ).replace("\\", "/")
+
+            if file_path.startswith(project_prefix):
+                return checkpoint
+
+    return None
+
+
+def get_project_file_summary(project_path):
+    ignored_dirs = {
+        "node_modules",
+        "__pycache__",
+        ".git",
+        ".venv",
+        "venv",
+        "dist",
+        ".vite",
+    }
+    summary = {
+        "total_files": 0,
+        "backend_files": 0,
+        "frontend_files": 0,
+    }
+
+    for root, dirs, files in os.walk(project_path):
+        dirs[:] = [
+            directory
+            for directory in dirs
+            if directory not in ignored_dirs
+        ]
+
+        for file_name in files:
+            relative_path = os.path.relpath(
+                os.path.join(root, file_name),
+                project_path,
+            ).replace("\\", "/")
+
+            summary["total_files"] += 1
+
+            if relative_path.startswith("backend/"):
+                summary["backend_files"] += 1
+
+            if relative_path.startswith("frontend/"):
+                summary["frontend_files"] += 1
+
+    return summary
+
+
+def _status_from_validation_output(validation_output):
+    if not validation_output:
+        return "not_run"
+
+    if any(marker in validation_output for marker in ["FAIL:", "NEEDS ATTENTION", "NEEDS FIX"]):
+        return "failed"
+
+    return "passed"
+
+
 def get_project_dashboard(project_name):
     project_path = os.path.join(WORKSPACE_DIR, project_name)
 
@@ -908,6 +1011,20 @@ def get_project_dashboard(project_name):
         for path in database_files
         if os.path.exists(path)
     ]
+    required_files = get_required_files_for_stack(stack_key)
+    missing_required_files = [
+        relative_path
+        for relative_path in required_files
+        if not os.path.exists(os.path.join(project_path, relative_path))
+    ]
+    latest_session = get_latest_codegen_session_for_project(project_name)
+    latest_checkpoint = get_latest_codegen_checkpoint_for_project(project_name)
+    validation_output = (latest_session or {}).get("validation_output", "")
+    validation_status = (
+        (latest_session or {}).get("validation_status")
+        or _status_from_validation_output(validation_output)
+    )
+    file_summary = get_project_file_summary(project_path)
 
     return {
         "exists": True,
@@ -929,6 +1046,20 @@ def get_project_dashboard(project_name):
         "runtime_backend_pid": runtime_state.get("backend_pid"),
         "runtime_frontend_pid": runtime_state.get("frontend_pid"),
         "runtime_log_files": runtime_state.get("log_files", {}),
+        "file_summary": file_summary,
+        "required_files_total": len(required_files),
+        "missing_required_files": missing_required_files,
+        "latest_codegen_session": latest_session,
+        "latest_codegen_checkpoint": latest_checkpoint,
+        "latest_validation_status": validation_status,
+        "latest_validation_output": validation_output,
+        "quick_commands": [
+            f"run fullstack {project_name}",
+            f"validate app {project_name}",
+            f"quality check {project_name}",
+            f"show logs {project_name}",
+            f"project history {project_name}",
+        ],
     }
 
 
