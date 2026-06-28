@@ -276,6 +276,124 @@ def is_port_listening(port):
     return bool(find_pids_listening_on_ports([port]))
 
 
+def get_project_runtime_health(project_name):
+    config = get_project_config(project_name, create_if_missing=False)
+
+    if not config:
+        return {
+            "exists": False,
+            "project_name": project_name,
+            "error": f"Project config not found: {project_name}",
+        }
+
+    ports = [
+        config.get("backend_port"),
+        config.get("frontend_port"),
+    ]
+    runtime_state = get_project_runtime_state(project_name)
+    stored_pids = get_runtime_state_pids(project_name)
+    listening_pids = sorted(find_pids_listening_on_ports(ports))
+    in_memory_processes = FULLSTACK_PROCESSES.get(project_name, {})
+    in_memory_pids = sorted(
+        process.pid
+        for process in in_memory_processes.values()
+        if getattr(process, "pid", None)
+    )
+    backend_running = is_port_listening(config.get("backend_port"))
+    frontend_running = is_port_listening(config.get("frontend_port"))
+    has_runtime_state = bool(runtime_state)
+    has_active_ports = bool(listening_pids)
+    stale_runtime_state = has_runtime_state and not has_active_ports and not in_memory_pids
+
+    return {
+        "exists": True,
+        "project_name": project_name,
+        "stack_key": config.get("stack_key"),
+        "backend_port": config.get("backend_port"),
+        "frontend_port": config.get("frontend_port"),
+        "backend_running": backend_running,
+        "frontend_running": frontend_running,
+        "runtime_state": runtime_state,
+        "stored_pids": stored_pids,
+        "listening_pids": listening_pids,
+        "in_memory_pids": in_memory_pids,
+        "stale_runtime_state": stale_runtime_state,
+        "status": "stale" if stale_runtime_state else "active" if has_active_ports else "stopped",
+    }
+
+
+def format_runtime_health_report(project_name):
+    health = get_project_runtime_health(project_name)
+
+    if not health.get("exists"):
+        return health.get("error", f"Project not found: {project_name}")
+
+    return f"""RUNTIME HEALTH REPORT
+
+PROJECT:
+{project_name}
+
+STATUS:
+{health["status"]}
+
+PORTS:
+backend {health.get("backend_port")} - {"running" if health.get("backend_running") else "stopped"}
+frontend {health.get("frontend_port")} - {"running" if health.get("frontend_running") else "stopped"}
+
+PIDS:
+stored: {health.get("stored_pids") or "none"}
+listening: {health.get("listening_pids") or "none"}
+in memory: {health.get("in_memory_pids") or "none"}
+
+STALE RUNTIME STATE:
+{"yes" if health.get("stale_runtime_state") else "no"}
+
+NEXT ACTION:
+{"cleanup runtime " + project_name if health.get("stale_runtime_state") else "run fullstack " + project_name if health["status"] == "stopped" else "show logs " + project_name}
+"""
+
+
+def cleanup_stale_runtime_state(project_name):
+    health = get_project_runtime_health(project_name)
+
+    if not health.get("exists"):
+        return health.get("error", f"Project not found: {project_name}")
+
+    if health.get("listening_pids"):
+        return f"""RUNTIME CLEANUP SKIPPED
+
+PROJECT:
+{project_name}
+
+REASON:
+Project ports still have listening processes: {health.get("listening_pids")}
+
+NEXT ACTION:
+stop fullstack {project_name}
+"""
+
+    if not health.get("runtime_state"):
+        return f"""RUNTIME CLEANUP COMPLETE
+
+PROJECT:
+{project_name}
+
+RESULT:
+No runtime state found.
+"""
+
+    clear_project_runtime_state(project_name)
+
+    return f"""RUNTIME CLEANUP COMPLETE
+
+PROJECT:
+{project_name}
+
+RESULT:
+Cleared stale runtime state.
+"""
+
+
 def taskkill_process_tree(pid):
     result = subprocess.run(
         ["taskkill", "/F", "/T", "/PID", str(pid)],

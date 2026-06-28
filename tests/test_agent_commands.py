@@ -23,6 +23,10 @@ def make_context():
         "list_codegen_checkpoints": lambda: "checkpoints",
         "show_codegen_checkpoint": lambda checkpoint_id: f"checkpoint:{checkpoint_id}",
         "restore_codegen_checkpoint": lambda checkpoint_id: f"restore:{checkpoint_id}",
+        "runtime_health": lambda project: f"runtime:{project}",
+        "cleanup_runtime": lambda project: f"cleanup:{project}",
+        "validation_center": lambda project: f"validation-center:{project}",
+        "repair_guidance": lambda project: f"repair-guidance:{project}",
         "create_app_workflow": lambda text: f"create:{text}",
     }
 
@@ -125,6 +129,13 @@ def test_codegen_checkpoint_commands_route_to_handlers():
         "restore codegen checkpoint checkpoint_123",
         make_context(),
     ) == "restore:checkpoint_123"
+
+
+def test_main_agent_upgrade_commands_route_to_handlers():
+    assert agent_commands.run_agent("runtime health demo_app", make_context()) == "runtime:demo_app"
+    assert agent_commands.run_agent("cleanup runtime demo_app", make_context()) == "cleanup:demo_app"
+    assert agent_commands.run_agent("validation center demo_app", make_context()) == "validation-center:demo_app"
+    assert agent_commands.run_agent("repair guidance demo_app", make_context()) == "repair-guidance:demo_app"
 
 
 def test_generate_code_file_validates_required_arguments():

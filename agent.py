@@ -72,6 +72,8 @@ from tools import (
     ensure_project_config,
     reset_project_database,
     run_frontend_build,
+    format_runtime_health_report,
+    cleanup_stale_runtime_state,
 )
 
 WORKSPACE_DIR = "workspace"
@@ -157,6 +159,12 @@ AI Coding Agent commands:
 
 - validate app <project_name>
   Run stack-aware file, build, API, database, and frontend runtime checks.
+
+- runtime health <project_name>
+  Show process, port, and runtime-state health for a project.
+
+- cleanup runtime <project_name>
+  Clear stale runtime state when project ports are not active.
 
 - supported stacks
   List app stacks this builder can generate.
@@ -1691,6 +1699,102 @@ PROJECT:
 
 RESULT:
 {status}: {detail}
+"""
+
+
+def runtime_health(project_name):
+    return format_runtime_health_report(project_name)
+
+
+def cleanup_runtime(project_name):
+    return cleanup_stale_runtime_state(project_name)
+
+
+def validation_center(project_name):
+    dashboard = tools.get_project_dashboard(project_name)
+
+    if not dashboard.get("exists"):
+        return dashboard.get("error", f"Project not found: {project_name}")
+
+    latest_output = dashboard.get("latest_validation_output") or "No validation output recorded yet."
+    missing_files = dashboard.get("missing_required_files", [])
+    missing_files_text = "\n".join(missing_files) if missing_files else "None"
+
+    return f"""VALIDATION CENTER
+
+PROJECT:
+{project_name}
+
+LATEST STATUS:
+{dashboard.get("latest_validation_status", "not_run")}
+
+MISSING REQUIRED FILES:
+{missing_files_text}
+
+AVAILABLE CHECKS:
+validate app {project_name}
+quality check {project_name}
+validate imports {project_name}
+validate contract {project_name}
+validate database {project_name}
+validate sqlite {project_name}
+test endpoints {project_name}
+runtime health {project_name}
+
+LATEST VALIDATION OUTPUT:
+{latest_output}
+"""
+
+
+def repair_guidance(project_name):
+    dashboard = tools.get_project_dashboard(project_name)
+
+    if not dashboard.get("exists"):
+        return dashboard.get("error", f"Project not found: {project_name}")
+
+    validation_output = dashboard.get("latest_validation_output") or ""
+    latest_checkpoint = dashboard.get("latest_codegen_checkpoint")
+    checkpoint_id = (latest_checkpoint or {}).get("id", "")
+    guidance = []
+
+    if dashboard.get("missing_required_files"):
+        guidance.append(f"restore missing files {project_name}")
+
+    if "backend import" in validation_output.lower() or "import" in validation_output.lower():
+        guidance.append(f"fix imports {project_name}")
+
+    if "contract" in validation_output.lower() or "route" in validation_output.lower():
+        guidance.append(f"fix contract {project_name}")
+
+    if "database" in validation_output.lower() or "sqlite" in validation_output.lower():
+        guidance.append(f"fix database {project_name}")
+        guidance.append(f"fix sqlite {project_name}")
+
+    if checkpoint_id:
+        guidance.append(f"restore codegen checkpoint {checkpoint_id}")
+
+    if not guidance:
+        guidance.extend([
+            f"validate app {project_name}",
+            f"quality check {project_name}",
+        ])
+
+    return f"""REPAIR WORKFLOW GUIDANCE
+
+PROJECT:
+{project_name}
+
+LATEST VALIDATION:
+{dashboard.get("latest_validation_status", "not_run")}
+
+LATEST CHECKPOINT:
+{checkpoint_id or "None"}
+
+SUGGESTED NEXT ACTIONS:
+{chr(10).join(guidance)}
+
+NOTE:
+Use checkpoint restore only when you want to undo the latest generated-code save.
 """
 
 

@@ -70,6 +70,10 @@ show codegen checkpoint <checkpoint_id>
 restore codegen checkpoint <checkpoint_id>
 run fullstack <project_name>
 validate app <project_name>
+validation center <project_name>
+repair guidance <project_name>
+runtime health <project_name>
+cleanup runtime <project_name>
 refresh project ports <project_name>
 refresh project spec <project_name>
 stop fullstack <project_name>

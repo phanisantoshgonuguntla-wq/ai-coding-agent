@@ -475,6 +475,26 @@ def build_command_registry(ctx):
             lambda text: ctx["validate_generated_app"](strip_command_prefix(text, "validate app")),
         ),
         Command(
+            "runtime_health",
+            lambda text, lower: lower.startswith("runtime health "),
+            lambda text: ctx["runtime_health"](strip_command_prefix(text, "runtime health")),
+        ),
+        Command(
+            "cleanup_runtime",
+            lambda text, lower: lower.startswith("cleanup runtime "),
+            lambda text: ctx["cleanup_runtime"](strip_command_prefix(text, "cleanup runtime")),
+        ),
+        Command(
+            "validation_center",
+            lambda text, lower: lower.startswith("validation center "),
+            lambda text: ctx["validation_center"](strip_command_prefix(text, "validation center")),
+        ),
+        Command(
+            "repair_guidance",
+            lambda text, lower: lower.startswith("repair guidance "),
+            lambda text: ctx["repair_guidance"](strip_command_prefix(text, "repair guidance")),
+        ),
+        Command(
             "make_standalone",
             lambda text, lower: lower.startswith("make standalone "),
             lambda text: _make_standalone(text, ctx),

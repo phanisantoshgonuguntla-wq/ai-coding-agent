@@ -157,3 +157,65 @@ def test_project_dashboard_includes_recent_codegen_and_file_summary(tmp_path, mo
     assert dashboard["latest_codegen_checkpoint"]["id"] == "checkpoint_1"
     assert dashboard["latest_validation_status"] == "passed"
     assert "validate app demo_app" in dashboard["quick_commands"]
+
+
+def test_runtime_health_reports_stale_state_and_cleanup(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(tools, "find_pids_listening_on_ports", lambda ports: set())
+
+    project_path = tmp_path / "workspace" / "demo_app"
+    project_path.mkdir(parents=True)
+    (project_path / "project_config.json").write_text(
+        json.dumps({
+            "stack_key": "react_flask_sqlite",
+            "frontend_url": "http://127.0.0.1:5173",
+            "backend_url": "http://127.0.0.1:5000",
+            "frontend_port": 5173,
+            "backend_port": 5000,
+        }),
+        encoding="utf-8",
+    )
+    state_dir = tmp_path / "workspace" / "_runtime"
+    state_dir.mkdir(parents=True)
+    (state_dir / "state.json").write_text(
+        json.dumps({
+            "demo_app": {
+                "backend_pid": 111,
+                "frontend_pid": 222,
+            }
+        }),
+        encoding="utf-8",
+    )
+
+    health = tools.get_project_runtime_health("demo_app")
+    report = tools.format_runtime_health_report("demo_app")
+    cleanup = tools.cleanup_stale_runtime_state("demo_app")
+
+    assert health["status"] == "stale"
+    assert health["stale_runtime_state"] is True
+    assert "cleanup runtime demo_app" in report
+    assert "Cleared stale runtime state" in cleanup
+    assert tools.get_project_runtime_state("demo_app") == {}
+
+
+def test_runtime_cleanup_skips_when_ports_are_active(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(tools, "find_pids_listening_on_ports", lambda ports: {999})
+
+    project_path = tmp_path / "workspace" / "demo_app"
+    project_path.mkdir(parents=True)
+    (project_path / "project_config.json").write_text(
+        json.dumps({
+            "stack_key": "react_flask_sqlite",
+            "frontend_url": "http://127.0.0.1:5173",
+            "backend_url": "http://127.0.0.1:5000",
+            "frontend_port": 5173,
+            "backend_port": 5000,
+        }),
+        encoding="utf-8",
+    )
+
+    output = tools.cleanup_stale_runtime_state("demo_app")
+
+    assert "RUNTIME CLEANUP SKIPPED" in output
+    assert "999" in output
