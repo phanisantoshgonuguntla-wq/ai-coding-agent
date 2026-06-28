@@ -1,5 +1,6 @@
 import agent_codegen
 import json
+import re
 
 
 def test_generate_code_requires_prompt():
@@ -467,6 +468,140 @@ def test_record_and_show_codegen_session(tmp_path):
     assert "passed" in output
     assert "add export" in output
     assert "axios" in output
+
+
+def test_save_code_files_content_creates_restorable_checkpoint(tmp_path):
+    existing_file = tmp_path / "demo_app" / "backend" / "utils.py"
+    existing_file.parent.mkdir(parents=True)
+    existing_file.write_text("old helper\n", encoding="utf-8")
+
+    output = agent_codegen.save_code_files_content(
+        [
+            {
+                "relative_path": "demo_app/backend/utils.py",
+                "code": "new helper",
+            },
+            {
+                "relative_path": "demo_app/frontend/src/App.jsx",
+                "code": "export default function App() { return null; }",
+            },
+        ],
+        workspace_dir=str(tmp_path),
+    )
+
+    checkpoint_id = re.search(r"checkpoint_[A-Za-z0-9_]+", output).group(0)
+
+    assert existing_file.read_text(encoding="utf-8") == "new helper\n"
+    assert (tmp_path / "demo_app" / "frontend" / "src" / "App.jsx").exists()
+    assert "CHECKPOINT:" in output
+
+    restore_output = agent_codegen.restore_codegen_checkpoint(
+        checkpoint_id,
+        workspace_dir=str(tmp_path),
+    )
+
+    assert "CODEGEN CHECKPOINT RESTORED" in restore_output
+    assert "PRE-RESTORE CHECKPOINT:" in restore_output
+    assert existing_file.read_text(encoding="utf-8") == "old helper\n"
+    assert not (tmp_path / "demo_app" / "frontend" / "src" / "App.jsx").exists()
+
+
+def test_list_and_show_codegen_checkpoints(tmp_path):
+    output = agent_codegen.save_code_content(
+        "snippets/math.py",
+        "def add(a, b):\n    return a + b",
+        workspace_dir=str(tmp_path),
+    )
+    checkpoint_id = re.search(r"checkpoint_[A-Za-z0-9_]+", output).group(0)
+
+    list_output = agent_codegen.list_codegen_checkpoints(workspace_dir=str(tmp_path))
+    show_output = agent_codegen.show_codegen_checkpoint(
+        checkpoint_id,
+        workspace_dir=str(tmp_path),
+    )
+
+    assert checkpoint_id in list_output
+    assert "single_file_save" in list_output
+    assert "CODEGEN CHECKPOINT" in show_output
+    assert "snippets/math.py (delete on restore)" in show_output
+
+
+def test_build_codegen_validation_plan_targets_backend_database_and_frontend():
+    plan = agent_codegen.build_codegen_validation_plan(
+        "demo_app",
+        [
+            {"relative_path": "demo_app/backend/models.py"},
+            {"relative_path": "demo_app/frontend/src/App.jsx"},
+        ],
+        "react_flask_sqlite",
+    )
+
+    assert plan["changed_paths"] == [
+        "backend/models.py",
+        "frontend/src/App.jsx",
+    ]
+    assert [check["key"] for check in plan["checks"]] == [
+        "backend_imports",
+        "database_schema",
+        "sqlite_runtime",
+        "api_contract",
+        "frontend_build",
+        "full_app_validation",
+    ]
+
+
+def test_build_codegen_validation_plan_keeps_frontend_only_narrow_for_dotnet():
+    plan = agent_codegen.build_codegen_validation_plan(
+        "demo_app",
+        [{"project_relative_path": "frontend/src/App.jsx"}],
+        "react_dotnet_sqlite",
+    )
+
+    assert [check["key"] for check in plan["checks"]] == ["frontend_build"]
+
+
+def test_validate_codegen_changes_runs_selected_validators():
+    calls = []
+
+    def make_validator(name):
+        def validator(project_name):
+            calls.append((name, project_name))
+            return f"PASS: {name}"
+
+        return validator
+
+    output = agent_codegen.validate_codegen_changes(
+        "demo_app",
+        [{"relative_path": "demo_app/backend/routes.py"}],
+        "react_flask_sqlite",
+        {
+            "backend_imports": make_validator("backend_imports"),
+            "api_contract": make_validator("api_contract"),
+            "full_app_validation": make_validator("full_app_validation"),
+        },
+    )
+
+    assert "CODEGEN TARGETED VALIDATION REPORT" in output
+    assert "FINAL STATUS:\nREADY" in output
+    assert calls == [
+        ("backend_imports", "demo_app"),
+        ("api_contract", "demo_app"),
+    ]
+
+
+def test_validate_codegen_changes_marks_failure():
+    output = agent_codegen.validate_codegen_changes(
+        "demo_app",
+        [{"relative_path": "demo_app/frontend/src/api.js"}],
+        "react_flask_sqlite",
+        {
+            "api_contract": lambda project_name: "FAIL: route missing",
+            "frontend_build": lambda project_name: "PASS: build ok",
+        },
+    )
+
+    assert "FINAL STATUS:\nNEEDS ATTENTION" in output
+    assert "FAIL: route missing" in output
 
 
 def test_list_codegen_sessions_orders_recent_first(tmp_path, monkeypatch):

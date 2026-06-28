@@ -63,6 +63,9 @@ save project code <project_name> add a CSV export helper and button
 explain project context <project_name> add a CSV export helper and button
 list codegen sessions
 show codegen session <session_id>
+list codegen checkpoints
+show codegen checkpoint <checkpoint_id>
+restore codegen checkpoint <checkpoint_id>
 run fullstack <project_name>
 validate app <project_name>
 refresh project ports <project_name>
@@ -73,7 +76,9 @@ stop all apps
 
 For generated code files, preview first and then save so the written file matches the reviewed output. If a target file already exists, the preview includes a diff before overwrite. Multi-file generation previews every target file before saving them together. In the UI, code generation includes prompt presets for common project changes such as API routes, React components, database fields, exports, and search/filter updates.
 
-Project-aware code generation reads the selected project's spec and prompt-relevant files, then previews changes under `workspace/<project_name>/`. Use `explain project context` to see which files will be included. Project-aware previews warn when generated Python or JavaScript imports are not declared in `backend/requirements.txt` or `frontend/package.json`, and they can include dependency patch suggestions for those files. In the UI, project-aware saves can optionally run validation immediately after saving and generate a repair preview when validation fails. Project-aware saves and repair saves record local codegen sessions under `workspace/_runtime/codegen_sessions/`.
+Project-aware code generation reads the selected project's spec and prompt-relevant files, then previews changes under `workspace/<project_name>/`. Use `explain project context` to see which files will be included. Project-aware previews warn when generated Python or JavaScript imports are not declared in `backend/requirements.txt` or `frontend/package.json`, and they can include dependency patch suggestions for those files. In the UI, project-aware saves can optionally run targeted validation based on the changed files and generate a repair preview when validation fails. Use `validate app <project_name>` when you want the broader full app validation. Project-aware saves and repair saves record local codegen sessions under `workspace/_runtime/codegen_sessions/`.
+
+Every generated-code save creates a local checkpoint under `workspace/_runtime/codegen_checkpoints/` before writing files. Use `list codegen checkpoints`, `show codegen checkpoint <checkpoint_id>`, and `restore codegen checkpoint <checkpoint_id>` to roll back a generated save.
 
 ## GitHub Notes
 

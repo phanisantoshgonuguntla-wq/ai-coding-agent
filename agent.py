@@ -70,7 +70,8 @@ from tools import (
     restore_changed_project_files,
     preflight_fullstack_project,
     ensure_project_config,
-    reset_project_database
+    reset_project_database,
+    run_frontend_build,
 )
 
 WORKSPACE_DIR = "workspace"
@@ -141,6 +142,15 @@ AI Coding Agent commands:
 
 - show codegen session <session_id>
   Show details for a saved code generation session.
+
+- list codegen checkpoints
+  Show recent generated-code save checkpoints.
+
+- show codegen checkpoint <checkpoint_id>
+  Show files that a checkpoint can restore or delete.
+
+- restore codegen checkpoint <checkpoint_id>
+  Restore workspace files from a generated-code save checkpoint.
 
 - quality check <project_name>
   Inspect generated project quality.
@@ -1670,6 +1680,20 @@ def validate_sqlite_runtime(project_name):
     return agent_quality.validate_sqlite_runtime(project_name)
 
 
+def validate_frontend_build(project_name):
+    ok, detail = run_frontend_build(project_name)
+    status = "PASS" if ok else "FAIL"
+
+    return f"""FRONTEND BUILD VALIDATION
+
+PROJECT:
+{project_name}
+
+RESULT:
+{status}: {detail}
+"""
+
+
 def fix_sqlite_runtime(project_name):
     return agent_quality.fix_sqlite_runtime(project_name)
 
@@ -1813,6 +1837,37 @@ def list_codegen_sessions():
 
 def show_codegen_session(session_id):
     return agent_codegen.show_codegen_session(session_id, WORKSPACE_DIR)
+
+
+def list_codegen_checkpoints():
+    return agent_codegen.list_codegen_checkpoints(WORKSPACE_DIR)
+
+
+def show_codegen_checkpoint(checkpoint_id):
+    return agent_codegen.show_codegen_checkpoint(checkpoint_id, WORKSPACE_DIR)
+
+
+def restore_codegen_checkpoint(checkpoint_id):
+    return agent_codegen.restore_codegen_checkpoint(checkpoint_id, WORKSPACE_DIR)
+
+
+def validate_codegen_changes(project_name, files):
+    stack_key = get_project_stack_key(project_name)
+    validators = {
+        "backend_imports": validate_backend_imports,
+        "database_schema": validate_database_schema,
+        "sqlite_runtime": validate_sqlite_runtime,
+        "api_contract": validate_api_contract,
+        "frontend_build": validate_frontend_build,
+        "full_app_validation": validate_generated_app,
+    }
+
+    return agent_codegen.validate_codegen_changes(
+        project_name,
+        files,
+        stack_key,
+        validators,
+    )
 
 
 def run_agent(user_input):

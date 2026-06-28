@@ -20,6 +20,9 @@ def make_context():
         "explain_project_context": lambda project, prompt: f"context:{project}:{prompt}",
         "list_codegen_sessions": lambda: "sessions",
         "show_codegen_session": lambda session_id: f"session:{session_id}",
+        "list_codegen_checkpoints": lambda: "checkpoints",
+        "show_codegen_checkpoint": lambda checkpoint_id: f"checkpoint:{checkpoint_id}",
+        "restore_codegen_checkpoint": lambda checkpoint_id: f"restore:{checkpoint_id}",
         "create_app_workflow": lambda text: f"create:{text}",
     }
 
@@ -112,6 +115,18 @@ def test_show_codegen_session_routes_session_id_to_handler():
     ) == "session:codegen_123"
 
 
+def test_codegen_checkpoint_commands_route_to_handlers():
+    assert agent_commands.run_agent("list codegen checkpoints", make_context()) == "checkpoints"
+    assert agent_commands.run_agent(
+        "show codegen checkpoint checkpoint_123",
+        make_context(),
+    ) == "checkpoint:checkpoint_123"
+    assert agent_commands.run_agent(
+        "restore codegen checkpoint checkpoint_123",
+        make_context(),
+    ) == "restore:checkpoint_123"
+
+
 def test_generate_code_file_validates_required_arguments():
     assert agent_commands.run_agent("generate code file", make_context()) == (
         "Use format: generate code file <workspace_path> <prompt>"
@@ -157,6 +172,15 @@ def test_explain_project_context_validates_required_arguments():
 def test_show_codegen_session_validates_required_arguments():
     assert agent_commands.run_agent("show codegen session", make_context()) == (
         "Use format: show codegen session <session_id>"
+    )
+
+
+def test_codegen_checkpoint_commands_validate_required_arguments():
+    assert agent_commands.run_agent("show codegen checkpoint", make_context()) == (
+        "Use format: show codegen checkpoint <checkpoint_id>"
+    )
+    assert agent_commands.run_agent("restore codegen checkpoint", make_context()) == (
+        "Use format: restore codegen checkpoint <checkpoint_id>"
     )
 
 

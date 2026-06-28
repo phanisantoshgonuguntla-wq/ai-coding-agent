@@ -219,6 +219,24 @@ def _show_codegen_session(user_input, ctx):
     return ctx["show_codegen_session"](session_id)
 
 
+def _show_codegen_checkpoint(user_input, ctx):
+    checkpoint_id = strip_command_prefix(user_input, "show codegen checkpoint")
+
+    if not checkpoint_id:
+        return "Use format: show codegen checkpoint <checkpoint_id>"
+
+    return ctx["show_codegen_checkpoint"](checkpoint_id)
+
+
+def _restore_codegen_checkpoint(user_input, ctx):
+    checkpoint_id = strip_command_prefix(user_input, "restore codegen checkpoint")
+
+    if not checkpoint_id:
+        return "Use format: restore codegen checkpoint <checkpoint_id>"
+
+    return ctx["restore_codegen_checkpoint"](checkpoint_id)
+
+
 def build_command_registry(ctx):
     return [
         Command(
@@ -245,6 +263,21 @@ def build_command_registry(ctx):
             "show_codegen_session",
             lambda text, lower: lower == "show codegen session" or lower.startswith("show codegen session "),
             lambda text: _show_codegen_session(text, ctx),
+        ),
+        Command(
+            "list_codegen_checkpoints",
+            lambda text, lower: lower == "list codegen checkpoints",
+            lambda text: ctx["list_codegen_checkpoints"](),
+        ),
+        Command(
+            "show_codegen_checkpoint",
+            lambda text, lower: lower == "show codegen checkpoint" or lower.startswith("show codegen checkpoint "),
+            lambda text: _show_codegen_checkpoint(text, ctx),
+        ),
+        Command(
+            "restore_codegen_checkpoint",
+            lambda text, lower: lower == "restore codegen checkpoint" or lower.startswith("restore codegen checkpoint "),
+            lambda text: _restore_codegen_checkpoint(text, ctx),
         ),
         Command(
             "explain_project_context",

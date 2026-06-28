@@ -10,6 +10,7 @@ from agent_text import clean_code_output
 
 
 CODEGEN_SESSIONS_DIR = os.path.join("_runtime", "codegen_sessions")
+CODEGEN_CHECKPOINTS_DIR = os.path.join("_runtime", "codegen_checkpoints")
 PYTHON_STDLIB_MODULES = {
     "collections",
     "csv",
@@ -1181,27 +1182,133 @@ def preview_project_repair_files(project_name, prompt, validation_output, worksp
     )["output"]
 
 
+def _get_codegen_checkpoints_dir(workspace_dir):
+    return os.path.join(workspace_dir, CODEGEN_CHECKPOINTS_DIR)
+
+
+def _build_checkpoint_id():
+    return (
+        "checkpoint_"
+        + datetime.now().strftime("%Y%m%d_%H%M%S")
+        + "_"
+        + uuid.uuid4().hex[:8]
+    )
+
+
+def _normalize_save_entries(files, workspace_dir):
+    entries = []
+
+    if not files:
+        raise ValueError("Please preview generated code files before saving.")
+
+    for file in files:
+        code = file.get("code", "")
+
+        if not code.strip():
+            raise ValueError("Generated file content cannot be empty.")
+
+        file_path = file.get("relative_path") or file.get("path") or ""
+
+        try:
+            relative_path, target_path = _normalize_workspace_path(
+                file_path,
+                workspace_dir,
+            )
+        except ValueError as error:
+            raise ValueError(str(error)) from error
+
+        entries.append({
+            "relative_path": relative_path,
+            "display_path": relative_path.replace("\\", "/"),
+            "target_path": target_path,
+            "code": code,
+        })
+
+    return entries
+
+
+def _create_codegen_checkpoint(entries, workspace_dir, reason):
+    checkpoints_dir = _get_codegen_checkpoints_dir(workspace_dir)
+    os.makedirs(checkpoints_dir, exist_ok=True)
+
+    checkpoint_id = _build_checkpoint_id()
+    timestamp = datetime.now().isoformat(timespec="seconds")
+    checkpoint_files = []
+
+    for entry in entries:
+        target_path = entry["target_path"]
+        existed = os.path.exists(target_path)
+        content = ""
+
+        if existed:
+            try:
+                with open(target_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+            except UnicodeDecodeError as error:
+                raise ValueError(
+                    "Could not create checkpoint because an existing file is not UTF-8 text: "
+                    f"workspace/{entry['display_path']}"
+                ) from error
+
+        checkpoint_files.append({
+            "relative_path": entry["relative_path"],
+            "display_path": entry["display_path"],
+            "existed": existed,
+            "content": content,
+        })
+
+    checkpoint = {
+        "id": checkpoint_id,
+        "reason": reason,
+        "created_at": timestamp,
+        "files": checkpoint_files,
+    }
+    checkpoint_path = os.path.join(checkpoints_dir, f"{checkpoint_id}.json")
+
+    with open(checkpoint_path, "w", encoding="utf-8") as f:
+        json.dump(checkpoint, f, indent=2)
+
+    return checkpoint
+
+
+def _write_save_entries(entries):
+    saved_paths = []
+
+    for entry in entries:
+        os.makedirs(os.path.dirname(entry["target_path"]), exist_ok=True)
+
+        with open(entry["target_path"], "w", encoding="utf-8") as f:
+            f.write(entry["code"])
+            f.write("\n")
+
+        saved_paths.append(f"workspace/{entry['display_path']}")
+
+    return saved_paths
+
+
 def save_code_content(file_path, code, workspace_dir="workspace"):
     if not code.strip():
         return "Please preview generated code before saving."
 
     try:
-        relative_path, target_path = _normalize_workspace_path(file_path, workspace_dir)
+        entries = _normalize_save_entries(
+            [{"relative_path": file_path, "code": code}],
+            workspace_dir,
+        )
+        checkpoint = _create_codegen_checkpoint(entries, workspace_dir, "single_file_save")
     except ValueError as error:
         return str(error)
 
-    os.makedirs(os.path.dirname(target_path), exist_ok=True)
-
-    with open(target_path, "w", encoding="utf-8") as f:
-        f.write(code)
-        f.write("\n")
-
-    display_path = relative_path.replace("\\", "/")
+    saved_paths = _write_save_entries(entries)
+    display_path = saved_paths[0]
 
     return f"""CODE GENERATED AND SAVED
 
+CHECKPOINT:
+{checkpoint["id"]}
+
 FILE:
-workspace/{display_path}
+{display_path}
 
 CODE:
 {code}
@@ -1212,32 +1319,18 @@ def save_code_files_content(files, workspace_dir="workspace"):
     if not files:
         return "Please preview generated code files before saving."
 
-    saved_paths = []
+    try:
+        entries = _normalize_save_entries(files, workspace_dir)
+        checkpoint = _create_codegen_checkpoint(entries, workspace_dir, "multi_file_save")
+    except ValueError as error:
+        return str(error)
 
-    for file in files:
-        code = file.get("code", "")
-
-        if not code.strip():
-            return "Generated file content cannot be empty."
-
-        try:
-            relative_path, target_path = _normalize_workspace_path(
-                file["relative_path"],
-                workspace_dir,
-            )
-        except ValueError as error:
-            return str(error)
-
-        os.makedirs(os.path.dirname(target_path), exist_ok=True)
-
-        with open(target_path, "w", encoding="utf-8") as f:
-            f.write(code)
-            f.write("\n")
-
-        display_path = relative_path.replace("\\", "/")
-        saved_paths.append(f"workspace/{display_path}")
+    saved_paths = _write_save_entries(entries)
 
     return f"""CODE FILES SAVED
+
+CHECKPOINT:
+{checkpoint["id"]}
 
 FILES:
 {chr(10).join(saved_paths)}
@@ -1246,6 +1339,14 @@ FILES:
 
 def _get_codegen_sessions_dir(workspace_dir):
     return os.path.join(workspace_dir, CODEGEN_SESSIONS_DIR)
+
+
+def _read_json_file(file_path):
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
 
 
 def _validation_status(validation_output):
@@ -1302,11 +1403,7 @@ def record_codegen_session(
 
 
 def _read_codegen_session_file(session_path):
-    try:
-        with open(session_path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return None
+    return _read_json_file(session_path)
 
 
 def list_codegen_sessions(workspace_dir="workspace", limit=20):
@@ -1390,6 +1487,364 @@ PROMPT:
 
 VALIDATION OUTPUT:
 {session.get("validation_output", "") or "Not run"}
+"""
+
+
+def _read_codegen_checkpoint(checkpoint_id, workspace_dir):
+    checkpoint_id = checkpoint_id.strip()
+
+    if not checkpoint_id:
+        return None
+
+    checkpoints_dir = _get_codegen_checkpoints_dir(workspace_dir)
+    checkpoint_path = os.path.join(checkpoints_dir, f"{checkpoint_id}.json")
+
+    if not os.path.exists(checkpoint_path):
+        return None
+
+    return _read_json_file(checkpoint_path)
+
+
+def list_codegen_checkpoints(workspace_dir="workspace", limit=20):
+    checkpoints_dir = _get_codegen_checkpoints_dir(workspace_dir)
+
+    if not os.path.exists(checkpoints_dir):
+        return "No codegen checkpoints found."
+
+    checkpoints = []
+
+    for file_name in os.listdir(checkpoints_dir):
+        if not file_name.endswith(".json"):
+            continue
+
+        checkpoint = _read_json_file(os.path.join(checkpoints_dir, file_name))
+
+        if checkpoint:
+            checkpoints.append(checkpoint)
+
+    if not checkpoints:
+        return "No codegen checkpoints found."
+
+    checkpoints.sort(key=lambda item: item.get("created_at", ""), reverse=True)
+    lines = [
+        "CODEGEN CHECKPOINTS",
+        "",
+    ]
+
+    for checkpoint in checkpoints[:limit]:
+        files = checkpoint.get("files", [])
+        lines.append(
+            f"{checkpoint.get('id')} | {checkpoint.get('reason')} | "
+            f"{len(files)} files | {checkpoint.get('created_at')}"
+        )
+
+    return "\n".join(lines)
+
+
+def show_codegen_checkpoint(checkpoint_id, workspace_dir="workspace"):
+    checkpoint_id = checkpoint_id.strip()
+
+    if not checkpoint_id:
+        return "Use format: show codegen checkpoint <checkpoint_id>"
+
+    checkpoint = _read_codegen_checkpoint(checkpoint_id, workspace_dir)
+
+    if not checkpoint:
+        return f"Codegen checkpoint not found: {checkpoint_id}"
+
+    file_lines = []
+
+    for file in checkpoint.get("files", []):
+        status = "restore" if file.get("existed") else "delete on restore"
+        file_lines.append(f"{file.get('display_path')} ({status})")
+
+    return f"""CODEGEN CHECKPOINT
+
+ID:
+{checkpoint.get("id")}
+
+REASON:
+{checkpoint.get("reason")}
+
+CREATED:
+{checkpoint.get("created_at")}
+
+FILES:
+{chr(10).join(file_lines) or "None"}
+"""
+
+
+def restore_codegen_checkpoint(checkpoint_id, workspace_dir="workspace"):
+    checkpoint_id = checkpoint_id.strip()
+
+    if not checkpoint_id:
+        return "Use format: restore codegen checkpoint <checkpoint_id>"
+
+    checkpoint = _read_codegen_checkpoint(checkpoint_id, workspace_dir)
+
+    if not checkpoint:
+        return f"Codegen checkpoint not found: {checkpoint_id}"
+
+    current_entries = []
+
+    for file in checkpoint.get("files", []):
+        try:
+            relative_path, target_path = _normalize_workspace_path(
+                file.get("relative_path", ""),
+                workspace_dir,
+            )
+        except ValueError as error:
+            return str(error)
+
+        current_entries.append({
+            "relative_path": relative_path,
+            "display_path": relative_path.replace("\\", "/"),
+            "target_path": target_path,
+            "code": file.get("content", ""),
+        })
+
+    try:
+        pre_restore = _create_codegen_checkpoint(
+            current_entries,
+            workspace_dir,
+            f"before_restore_{checkpoint_id}",
+        )
+    except ValueError as error:
+        return str(error)
+
+    restored_lines = []
+
+    for file in checkpoint.get("files", []):
+        relative_path, target_path = _normalize_workspace_path(
+            file.get("relative_path", ""),
+            workspace_dir,
+        )
+        display_path = relative_path.replace("\\", "/")
+
+        if file.get("existed"):
+            os.makedirs(os.path.dirname(target_path), exist_ok=True)
+
+            with open(target_path, "w", encoding="utf-8") as f:
+                f.write(file.get("content", ""))
+
+            restored_lines.append(f"workspace/{display_path} (restored)")
+        else:
+            if os.path.exists(target_path):
+                os.remove(target_path)
+
+            restored_lines.append(f"workspace/{display_path} (deleted)")
+
+    return f"""CODEGEN CHECKPOINT RESTORED
+
+ID:
+{checkpoint_id}
+
+PRE-RESTORE CHECKPOINT:
+{pre_restore["id"]}
+
+FILES:
+{chr(10).join(restored_lines)}
+"""
+
+
+def _project_relative_path_from_file(file, project_name):
+    raw_path = (
+        file.get("project_relative_path")
+        or file.get("relative_path")
+        or file.get("display_path")
+        or file.get("path")
+        or ""
+    )
+    normalized_path = raw_path.replace("\\", "/")
+
+    if normalized_path.startswith("workspace/"):
+        normalized_path = normalized_path[len("workspace/"):]
+
+    project_prefix = f"{project_name}/"
+
+    if normalized_path.startswith(project_prefix):
+        normalized_path = normalized_path[len(project_prefix):]
+
+    return normalized_path
+
+
+def build_codegen_validation_plan(project_name, files, stack_key="react_flask_sqlite"):
+    changed_paths = [
+        _project_relative_path_from_file(file, project_name)
+        for file in files
+    ]
+    changed_paths = [
+        path
+        for path in changed_paths
+        if path
+    ]
+    changed_set = set(changed_paths)
+    touches_backend = any(path.startswith("backend/") for path in changed_set)
+    touches_frontend = any(path.startswith("frontend/") for path in changed_set)
+    touches_database = any(
+        path in {
+            "backend/database.py",
+            "backend/models.py",
+            "backend/database.php",
+            "backend/Program.cs",
+        }
+        for path in changed_set
+    )
+    touches_api_contract = any(
+        path in {
+            "backend/routes.py",
+            "backend/app.py",
+            "backend/index.php",
+            "backend/Program.cs",
+            "frontend/src/api.js",
+        }
+        for path in changed_set
+    )
+    touches_frontend_build = touches_frontend or "frontend/package.json" in changed_set
+    touches_python_backend = any(
+        path.startswith("backend/") and path.endswith(".py")
+        for path in changed_set
+    ) or "backend/requirements.txt" in changed_set
+    checks = []
+
+    if stack_key == "react_flask_sqlite":
+        if touches_python_backend:
+            checks.append({
+                "key": "backend_imports",
+                "label": "Backend import validation",
+                "reason": "Python backend files changed.",
+            })
+
+        if touches_database:
+            checks.append({
+                "key": "database_schema",
+                "label": "Database schema validation",
+                "reason": "Database/model files changed.",
+            })
+            checks.append({
+                "key": "sqlite_runtime",
+                "label": "SQLite runtime validation",
+                "reason": "Database/model files changed.",
+            })
+
+        if touches_api_contract or (touches_backend and touches_frontend):
+            checks.append({
+                "key": "api_contract",
+                "label": "API contract validation",
+                "reason": "API-facing backend or frontend files changed.",
+            })
+
+        if touches_frontend_build:
+            checks.append({
+                "key": "frontend_build",
+                "label": "Frontend production build",
+                "reason": "Frontend files changed.",
+            })
+
+        if touches_backend and touches_frontend:
+            checks.append({
+                "key": "full_app_validation",
+                "label": "Full app validation",
+                "reason": "Backend and frontend changed together.",
+            })
+    else:
+        if touches_frontend_build:
+            checks.append({
+                "key": "frontend_build",
+                "label": "Frontend production build",
+                "reason": "Frontend files changed.",
+            })
+
+        if touches_backend:
+            checks.append({
+                "key": "full_app_validation",
+                "label": "Full app validation",
+                "reason": "Stack-specific backend validation is broad for this stack.",
+            })
+
+    if not checks:
+        checks.append({
+            "key": "full_app_validation",
+            "label": "Full app validation",
+            "reason": "Changed files did not match a narrower validator.",
+        })
+
+    deduped_checks = []
+    seen = set()
+
+    for check in checks:
+        if check["key"] in seen:
+            continue
+
+        deduped_checks.append(check)
+        seen.add(check["key"])
+
+    return {
+        "changed_paths": changed_paths,
+        "checks": deduped_checks,
+    }
+
+
+def _validation_result_failed(output):
+    return any(
+        marker in output
+        for marker in ["FAIL:", "NEEDS ATTENTION", "NEEDS FIX", "failed", "not found"]
+    )
+
+
+def validate_codegen_changes(project_name, files, stack_key, validators):
+    if not files:
+        return "Please provide changed files to validate."
+
+    plan = build_codegen_validation_plan(project_name, files, stack_key)
+    results = []
+    failures = []
+
+    for check in plan["checks"]:
+        validator = validators.get(check["key"])
+
+        if not validator:
+            output = f"SKIP: Validator not configured for {check['key']}."
+        else:
+            try:
+                output = validator(project_name)
+            except Exception as error:
+                output = f"FAIL: {check['label']} raised an error: {error}"
+
+        section = f"""CHECK:
+{check["label"]}
+
+REASON:
+{check["reason"]}
+
+RESULT:
+{output}"""
+        results.append(section)
+
+        if _validation_result_failed(output):
+            failures.append(check["label"])
+
+    final_status = "READY" if not failures else "NEEDS ATTENTION"
+
+    return f"""CODEGEN TARGETED VALIDATION REPORT
+
+PROJECT:
+{project_name}
+
+STACK:
+{stack_key}
+
+FINAL STATUS:
+{final_status}
+
+CHANGED FILES:
+{chr(10).join(plan["changed_paths"]) or "None"}
+
+VALIDATION PLAN:
+{chr(10).join("- " + check["label"] for check in plan["checks"])}
+
+RESULTS:
+{chr(10).join(results)}
 """
 
 

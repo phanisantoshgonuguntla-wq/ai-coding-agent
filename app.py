@@ -273,10 +273,11 @@ elif mode == "Generate code":
                     validation_output = ""
 
                     if validate_after_save:
-                        with st.spinner("Validating repaired project..."):
+                        with st.spinner("Validating repaired project changes..."):
                             try:
-                                validation_output = run_agent(
-                                    f"validate app {project_name}"
+                                validation_output = agent.validate_codegen_changes(
+                                    project_name,
+                                    repair_preview["files"],
                                 )
                             except Exception as error:
                                 validation_output = str(error)
@@ -368,10 +369,11 @@ elif mode == "Generate code":
 
                     if project_aware:
                         if validate_after_save:
-                            with st.spinner("Validating saved project..."):
+                            with st.spinner("Validating saved project changes..."):
                                 try:
-                                    validation_output = run_agent(
-                                        f"validate app {project_name}"
+                                    validation_output = agent.validate_codegen_changes(
+                                        project_name,
+                                        preview["files"],
                                     )
                                 except Exception as error:
                                     validation_output = str(error)
